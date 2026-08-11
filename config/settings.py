@@ -26,9 +26,16 @@ ALLOWED_HOSTS = [
 
 CSRF_TRUSTED_ORIGINS = [
     o.strip()
-    for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',')
+    for o in os.environ.get(
+        'CSRF_TRUSTED_ORIGINS',
+        'https://plan.sitematrix.co.uk',
+    ).split(',')
     if o.strip()
 ]
+
+# Trust HTTPS from reverse proxy (Traefik / nginx / Cloudflare, etc.)
+if os.environ.get('USE_X_FORWARDED_PROTO', '0') == '1':
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 INSTALLED_APPS = [
     'django.contrib.admin',

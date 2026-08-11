@@ -9,9 +9,10 @@ services:
       PORT: "8889"
       DEBUG: "0"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
-      ALLOWED_HOSTS: "*"
-      CSRF_TRUSTED_ORIGINS: "${CSRF_TRUSTED_ORIGINS:-http://localhost:8889,http://127.0.0.1:8889}"
+      ALLOWED_HOSTS: "plan.sitematrix.co.uk,localhost,127.0.0.1"
+      CSRF_TRUSTED_ORIGINS: "https://plan.sitematrix.co.uk,http://localhost:8889,http://127.0.0.1:8889"
       SQLITE_PATH: /data/db.sqlite3
+      USE_X_FORWARDED_PROTO: "1"
     volumes:
       - routeplanner_data:/data
     restart: unless-stopped

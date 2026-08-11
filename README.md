@@ -25,17 +25,19 @@ Local Django app for planning a day's Openreach jobs with AM / PM / all-day appo
 
 ## Docker (port 8889)
 
+Public URL: **https://plan.sitematrix.co.uk**
+
 ```bash
 docker compose up -d --build
 ```
 
-App: http://localhost:8889/
+Container listens on **8889** — point your reverse proxy / Traefik at that port.
 
 Optional env vars (compose / `.env`):
 
-- `SECRET_KEY` — Django secret
-- `CSRF_TRUSTED_ORIGINS` — comma-separated origins, e.g. `http://192.168.0.93:8889`
-- `ALLOWED_HOSTS` — default `*`
+- `SECRET_KEY` — Django secret (set a strong one in production)
+- `CSRF_TRUSTED_ORIGINS` — defaults include `https://plan.sitematrix.co.uk`
+- `ALLOWED_HOSTS` — defaults include `plan.sitematrix.co.uk`
 
 Data persists in the `routeplanner_data` Docker volume.
 
