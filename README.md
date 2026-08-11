@@ -31,7 +31,7 @@ Public URL: **https://plan.sitematrix.co.uk**
 docker compose up -d --build
 ```
 
-Container listens on **8889** — point your reverse proxy / Traefik at that port.
+Container listens on **8889** on the **host network** (same as other SiteMatrix services), so the proxy can reach `http://127.0.0.1:8889`.
 
 Optional env vars (compose / `.env`):
 

@@ -3,8 +3,8 @@ services:
     build: .
     image: routeplanner:latest
     container_name: routeplanner
-    ports:
-      - "8889:8889"
+    # Same as other SiteMatrix services — proxy reaches this via 127.0.0.1:8889
+    network_mode: host
     environment:
       PORT: "8889"
       DEBUG: "0"
@@ -14,7 +14,6 @@ services:
       SQLITE_PATH: /data/db.sqlite3
       USE_X_FORWARDED_PROTO: "1"
       # Optional — only needed if you want SiteMatrix live/offline gating.
-      # Leave empty to run the planner without SiteMatrix auth.
       SITEMATRIX_API_URL: "${SITEMATRIX_API_URL:-https://www.sitematrix.co.uk}"
       SITEMATRIX_API_KEY: "${SITEMATRIX_API_KEY:-}"
       SITEMATRIX_FAIL_OPEN: "${SITEMATRIX_FAIL_OPEN:-1}"
