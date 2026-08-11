@@ -115,8 +115,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # SiteMatrix
-SITEMATRIX_API_URL = env("SITEMATRIX_API_URL", default="https://www.sitematrix.co.uk")
-SITEMATRIX_API_KEY = env("SITEMATRIX_API_KEY", default="")
-SITEMATRIX_FAIL_OPEN = env.bool("SITEMATRIX_FAIL_OPEN", default=True)
-SITEMATRIX_SITE_NAME = env("SITEMATRIX_SITE_NAME", default="")
-SITEMATRIX_TIMEOUT = env.int("SITEMATRIX_TIMEOUT", default=3)
+SITEMATRIX_API_URL = os.environ.get(
+    'SITEMATRIX_API_URL',
+    'https://www.sitematrix.co.uk',
+)
+SITEMATRIX_API_KEY = os.environ.get('SITEMATRIX_API_KEY', '')
+SITEMATRIX_FAIL_OPEN = os.environ.get('SITEMATRIX_FAIL_OPEN', '1') == '1'
+SITEMATRIX_SITE_NAME = os.environ.get('SITEMATRIX_SITE_NAME', '')
+SITEMATRIX_TIMEOUT = int(os.environ.get('SITEMATRIX_TIMEOUT', '3'))
