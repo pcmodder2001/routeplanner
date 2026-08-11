@@ -23,6 +23,8 @@ ALLOWED_HOSTS = [
     for h in os.environ.get('ALLOWED_HOSTS', '*').split(',')
     if h.strip()
 ]
+if not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ['*']
 
 CSRF_TRUSTED_ORIGINS = [
     o.strip()
@@ -34,7 +36,7 @@ CSRF_TRUSTED_ORIGINS = [
 ]
 
 # Trust HTTPS from reverse proxy (Traefik / nginx / Cloudflare, etc.)
-if os.environ.get('USE_X_FORWARDED_PROTO', '0') == '1':
+if os.environ.get('USE_X_FORWARDED_PROTO', '1') == '1':
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 INSTALLED_APPS = [
@@ -113,13 +115,47 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'sitematrix_client': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
 
-# SiteMatrix
+# SiteMatrix (optional — leave API key empty to disable the gate)
 SITEMATRIX_API_URL = os.environ.get(
     'SITEMATRIX_API_URL',
     'https://www.sitematrix.co.uk',
 )
 SITEMATRIX_API_KEY = os.environ.get('SITEMATRIX_API_KEY', '')
-SITEMATRIX_FAIL_OPEN = os.environ.get('SITEMATRIX_FAIL_OPEN', '1') == '1'
+SITEMATRIX_FAIL_OPEN = os.environ.get('SITEMATRIX_FAIL_OPEN', '1') not in (
+    '0',
+    'false',
+    'False',
+    'no',
+    'NO',
+)
 SITEMATRIX_SITE_NAME = os.environ.get('SITEMATRIX_SITE_NAME', '')
-SITEMATRIX_TIMEOUT = int(os.environ.get('SITEMATRIX_TIMEOUT', '3'))
+try:
+    SITEMATRIX_TIMEOUT = int(os.environ.get('SITEMATRIX_TIMEOUT', '3') or '3')
+except ValueError:
+    SITEMATRIX_TIMEOUT = 3

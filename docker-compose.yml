@@ -9,18 +9,26 @@ services:
       PORT: "8889"
       DEBUG: "0"
       SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
-      ALLOWED_HOSTS: "plan.sitematrix.co.uk,localhost,127.0.0.1"
+      ALLOWED_HOSTS: "*"
       CSRF_TRUSTED_ORIGINS: "https://plan.sitematrix.co.uk,http://localhost:8889,http://127.0.0.1:8889"
       SQLITE_PATH: /data/db.sqlite3
       USE_X_FORWARDED_PROTO: "1"
+      # Optional — only needed if you want SiteMatrix live/offline gating.
+      # Leave empty to run the planner without SiteMatrix auth.
       SITEMATRIX_API_URL: "${SITEMATRIX_API_URL:-https://www.sitematrix.co.uk}"
       SITEMATRIX_API_KEY: "${SITEMATRIX_API_KEY:-}"
       SITEMATRIX_FAIL_OPEN: "${SITEMATRIX_FAIL_OPEN:-1}"
-      SITEMATRIX_SITE_NAME: "${SITEMATRIX_SITE_NAME:-}"
+      SITEMATRIX_SITE_NAME: "${SITEMATRIX_SITE_NAME:-Route Planner}"
       SITEMATRIX_TIMEOUT: "${SITEMATRIX_TIMEOUT:-3}"
     volumes:
       - routeplanner_data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8889/health/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
   routeplanner_data:
