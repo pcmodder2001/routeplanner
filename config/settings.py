@@ -38,6 +38,7 @@ if os.environ.get('USE_X_FORWARDED_PROTO', '0') == '1':
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 INSTALLED_APPS = [
+    "sitematrix_client",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -56,6 +57,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "sitematrix_client.middleware.SiteMatrixGateMiddleware",
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -110,3 +112,11 @@ STORAGES = {
 }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# SiteMatrix
+SITEMATRIX_API_URL = env("SITEMATRIX_API_URL", default="https://www.sitematrix.co.uk")
+SITEMATRIX_API_KEY = env("SITEMATRIX_API_KEY", default="")
+SITEMATRIX_FAIL_OPEN = env.bool("SITEMATRIX_FAIL_OPEN", default=True)
+SITEMATRIX_SITE_NAME = env("SITEMATRIX_SITE_NAME", default="")
+SITEMATRIX_TIMEOUT = env.int("SITEMATRIX_TIMEOUT", default=3)
