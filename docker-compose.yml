@@ -1,0 +1,20 @@
+services:
+  routeplanner:
+    build: .
+    image: routeplanner:latest
+    container_name: routeplanner
+    ports:
+      - "8889:8889"
+    environment:
+      PORT: "8889"
+      DEBUG: "0"
+      SECRET_KEY: "${SECRET_KEY:-change-me-in-production}"
+      ALLOWED_HOSTS: "*"
+      CSRF_TRUSTED_ORIGINS: "${CSRF_TRUSTED_ORIGINS:-http://localhost:8889,http://127.0.0.1:8889}"
+      SQLITE_PATH: /data/db.sqlite3
+    volumes:
+      - routeplanner_data:/data
+    restart: unless-stopped
+
+volumes:
+  routeplanner_data:

@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Route Planner{% endblock %}
+
+{% block content %}
+<section class="hero-bar">
+  <div>
+    <h1>Today's route</h1>
+    <p class="lede">
+      AM first (8am–1pm), PM after (1pm–6pm), all-day slotted where the route is shortest.
+      Clear the route in the evening, then build tomorrow's list in the morning.
+    </p>
+  </div>
+</section>
+
+{% if not settings.start_location %}
+<div class="banner">
+  Set your <a href="{% url 'settings' %}">start postcode</a> (home/depot) so routes begin from the right place.
+</div>
+{% else %}
+<div class="banner banner-ok">
+  Starting from <strong>{{ settings.start_display|default:settings.start_location }}</strong>
+  · <a href="{% url 'settings' %}">change</a>
+</div>
+{% endif %}
+
+<div class="layout">
+  <aside class="panel">
+    <h2>Add job</h2>
+    <form method="post" action="{% url 'add_job' %}" class="stack">
+      {% csrf_token %}
+      {{ job_form.location }}
+      {{ job_form.appointment_type }}
+      {{ job_form.reference }}
+      {{ job_form.notes }}
+      <button type="submit" class="btn btn-primary">Add job</button>
+    </form>
+
+    <div class="actions-row">
+      <form method="post" action="{% url 'plan_route' %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-accent" {% if not jobs %}disabled{% endif %}>
+          {% if has_route %}Re-plan route{% else %}Plan best route{% endif %}
+        </button>
+      </form>
+      {% if maps_url %}
+      <a class="btn btn-ghost" href="{{ maps_url }}" target="_blank" rel="noopener">Open in Google Maps</a>
+      {% endif %}
+    </div>
+
+    {% if jobs %}
+    <form method="post" action="{% url 'clear_route' %}" onsubmit="return confirm('Clear the whole route and remove all jobs?');">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger-link">Clear route</button>
+    </form>
+    {% endif %}
+
+    {% if has_route %}
+    <div class="stat-line">
+      <span>{{ planned_count }} stops</span>
+      <span>{{ total_miles }} mi · {{ total_minutes }} min driving</span>
+    </div>
+    {% endif %}
+  </aside>
+
+  <section class="panel panel-main">
+    <div class="panel-head">
+      <h2>Route</h2>
+      {% if has_route %}
+      <span class="pill">{% if route_source == 'osrm' %}Road route{% else %}Ordered{% endif %}</span>
+      {% else %}
+      <span class="pill pill-muted">Not planned yet</span>
+      {% endif %}
+    </div>
+
+    {% if jobs %}
+    <ol class="job-list">
+      {% for row in job_rows %}
+      {% with job=row.job %}
+      <li class="job-card type-{{ job.appointment_type }}">
+        <div class="job-order">
+          {% if job.route_order %}
+          <span class="order-num">{{ job.route_order }}</span>
+          {% else %}
+          <span class="order-num muted">–</span>
+          {% endif %}
+        </div>
+        <div class="job-body">
+          <div class="job-top">
+            <strong>{% if job.geocode_display %}{{ job.geocode_display }}{% else %}{{ job.location }}{% endif %}</strong>
+          </div>
+          {% if job.geocode_display and job.location|upper != job.geocode_display|upper %}
+          <div class="meta">Entered: {{ job.location }}</div>
+          {% endif %}
+          <div class="meta-row">
+            {% if job.reference %}<span>Ref: {{ job.reference }}</span>{% endif %}
+            {% if job.estimated_arrival %}<span>ETA ~{{ job.estimated_arrival|time:"H:i" }}</span>{% endif %}
+            {% if job.leg_minutes_from_previous != None %}<span>{{ job.leg_minutes_from_previous }} min drive</span>{% endif %}
+            {% if job.leg_miles_from_previous != None %}<span>{{ job.leg_miles_from_previous }} mi</span>{% endif %}
+            {% if not job.is_geocoded %}<span class="warn">Not located</span>{% endif %}
+          </div>
+
+          <form method="post" action="{% url 'update_appointment' job.pk %}" class="inline-edit">
+            {% csrf_token %}
+            <label class="inline-label">
+              <span>Window</span>
+              {{ row.appointment_form.appointment_type }}
+            </label>
+            <button type="submit" class="btn btn-tiny">Update</button>
+          </form>
+
+          <form method="post" action="{% url 'update_notes' job.pk %}" class="notes-edit">
+            {% csrf_token %}
+            {{ row.notes_form.notes }}
+            <button type="submit" class="btn btn-tiny">Save note</button>
+          </form>
+        </div>
+        <form method="post" action="{% url 'delete_job' job.pk %}" class="job-actions">
+          {% csrf_token %}
+          <button type="submit" class="btn-icon" title="Remove" aria-label="Remove job">×</button>
+        </form>
+      </li>
+      {% endwith %}
+      {% endfor %}
+    </ol>
+    {% else %}
+    <div class="empty">
+      <p>No jobs yet.</p>
+      <p>Add postcodes or addresses on the left, then hit <strong>Plan best route</strong>.</p>
+    </div>
+    {% endif %}
+
+    <div id="map" class="map" aria-label="Route map"></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ map_points|json_script:"map-data" }}
+{{ route_geometry|json_script:"route-geometry" }}
+<script>
+(function () {
+  const points = JSON.parse(document.getElementById('map-data').textContent);
+  const geometry = JSON.parse(document.getElementById('route-geometry').textContent);
+  const mapEl = document.getElementById('map');
+  if (!mapEl) return;
+
+  const map = L.map('map', { scrollWheelZoom: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+
+  if (!points.length) {
+    map.setView([54.5, -2.5], 6);
+    return;
+  }
+
+  const colours = {
+    START: '#1f3d2a',
+    AM: '#0b6e4f',
+    PM: '#b45309',
+    ALLDAY: '#1d4ed8'
+  };
+
+  const latLngs = [];
+  points.forEach(function (p) {
+    const ll = [p.lat, p.lng];
+    latLngs.push(ll);
+    const colour = colours[p.type] || '#333';
+    const marker = L.circleMarker(ll, {
+      radius: p.type === 'START' ? 8 : 10,
+      color: '#fff',
+      weight: 2,
+      fillColor: colour,
+      fillOpacity: 1
+    }).addTo(map);
+    const title = p.type === 'START'
+      ? p.label
+      : '#' + p.order + ' · ' + p.label + ' (' + p.type + ')';
+    marker.bindPopup(title);
+  });
+
+  const path = (geometry && geometry.length > 1) ? geometry : latLngs;
+  if (path.length > 1) {
+    L.polyline(path, {
+      color: '#1f3d2a',
+      weight: 4,
+      opacity: 0.85,
+      lineJoin: 'round'
+    }).addTo(map);
+    map.fitBounds(path, { padding: [36, 36] });
+  } else {
+    map.fitBounds(latLngs, { padding: [36, 36] });
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Route Planner{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="{% url 'dashboard' %}">
+        <span class="brand-mark">OR</span>
+        <span class="brand-text">
+          <strong>Route Planner</strong>
+          <small>Openreach day routes</small>
+        </span>
+      </a>
+      <nav class="nav">
+        <a href="{% url 'dashboard' %}">Today</a>
+        <a href="{% url 'settings' %}">Start point</a>
+        <a href="/admin/">Admin</a>
+      </nav>
+    </div>
+  </header>
+
+  {% if messages %}
+  <div class="flash-wrap">
+    {% for message in messages %}
+    <div class="flash flash-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <main class="page">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Start point · Route Planner{% endblock %}
+
+{% block content %}
+<section class="narrow">
+  <h1>Start point</h1>
+  <p class="lede">Where you leave from in the morning. Routes are planned from here.</p>
+
+  <form method="post" class="panel stack">
+    {% csrf_token %}
+    <label class="field">
+      <span>Label</span>
+      {{ form.start_label }}
+    </label>
+    <label class="field">
+      <span>Postcode or address</span>
+      {{ form.start_location }}
+    </label>
+    {% if settings.start_display %}
+    <p class="meta"><strong>{{ settings.start_display }}</strong></p>
+    {% endif %}
+    {% if settings.start_lat %}
+    <p class="meta">Coords {{ settings.start_lat|floatformat:5 }}, {{ settings.start_lng|floatformat:5 }}</p>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">Save start point</button>
+  </form>
+</section>
+{% endblock %}
