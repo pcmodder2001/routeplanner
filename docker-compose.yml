@@ -22,7 +22,9 @@ services:
       # Optional: traffic-aware times (Google) or ORS road times
       GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY:-}"
       OPENROUTESERVICE_API_KEY: "${OPENROUTESERVICE_API_KEY:-}"
-      # Optional: list every address at a UK postcode (getaddress.io / Royal Mail PAF)
+      # Optional: list every address at a UK postcode (Ideal Postcodes / Royal Mail PAF)
+      # getAddress.io shut down Feb 2026 — use IDEAL_POSTCODES_API_KEY instead
+      IDEAL_POSTCODES_API_KEY: "${IDEAL_POSTCODES_API_KEY:-}"
       GETADDRESS_API_KEY: "${GETADDRESS_API_KEY:-}"
     volumes:
       - routeplanner_data:/data

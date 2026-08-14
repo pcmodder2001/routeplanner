@@ -8,10 +8,10 @@ from .geocoding import (
     address_autocomplete,
     address_lookup_enabled,
     geocode_location,
-    getaddress_api_key,
     google_geocode,
     google_maps_key,
     google_place_details,
+    paf_lookup_enabled,
 )
 from .models import DayRoute, EngineerSettings, Job
 from .osrm import active_routing_label
@@ -162,7 +162,7 @@ def dashboard(request):
         'route_source_label': source_label,
         'routing_provider': active_routing_label(),
         'google_places_enabled': bool(google_maps_key()),
-        'getaddress_enabled': bool(getaddress_api_key()),
+        'getaddress_enabled': paf_lookup_enabled(),
         'address_lookup_enabled': address_lookup_enabled(),
     }
     return render(request, 'planner/dashboard.html', context)
@@ -179,7 +179,7 @@ def places_autocomplete(request):
         {
             'suggestions': suggestions,
             'enabled': True,
-            'getaddress': bool(getaddress_api_key()),
+            'paf': paf_lookup_enabled(),
         }
     )
 

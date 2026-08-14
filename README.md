@@ -35,8 +35,8 @@ Container listens on **8889** on the **host network** (same as other SiteMatrix 
 
 Optional env vars (compose / `.env`):
 
-- `GOOGLE_MAPS_API_KEY` — traffic times + Places street autocomplete
-- `GETADDRESS_API_KEY` — **list every address at a UK postcode** ([getAddress.io](https://getaddress.io/), Royal Mail PAF). Places / Address Validation cannot do this.
+- `GOOGLE_MAPS_API_KEY` — traffic times + Places street autocomplete + postcode+door resolution
+- `IDEAL_POSTCODES_API_KEY` — **list every address at a UK postcode** ([Ideal Postcodes](https://ideal-postcodes.co.uk/)). getAddress.io shut down in Feb 2026.
 - `OPENROUTESERVICE_API_KEY` — optional road times without Google
 - `SECRET_KEY` — Django secret (set a strong one in production)
 - `CSRF_TRUSTED_ORIGINS` — defaults include `https://plan.sitematrix.co.uk`
@@ -66,7 +66,8 @@ python manage.py runserver 0.0.0.0:8000
 ## Notes
 
 - UK postcodes via [postcodes.io](https://postcodes.io/) (free)
-- Full address list at a postcode via [getAddress.io](https://getaddress.io/) when `GETADDRESS_API_KEY` is set
+- Full address list at a postcode via [Ideal Postcodes](https://ideal-postcodes.co.uk/) when `IDEAL_POSTCODES_API_KEY` is set
+- Postcode + door number (e.g. `WF16 9PF 22`) resolves via Google Geocoding when no PAF key is set
 - Street names via OpenStreetMap Nominatim reverse geocode
 - Drive times: Google traffic if `GOOGLE_MAPS_API_KEY`, else OpenRouteService if `OPENROUTESERVICE_API_KEY`, else public OSRM
 - Drag to lock manual order; Done/Skip re-routes remaining stops; Navigate = next stop only

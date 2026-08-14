@@ -30,13 +30,34 @@ def google_maps_key() -> str:
     return (os.environ.get('GOOGLE_MAPS_API_KEY') or '').strip()
 
 
+def ideal_postcodes_api_key() -> str:
+    """
+    Royal Mail PAF lookup via Ideal Postcodes.
+
+    getAddress.io shut down Feb 2026 — only Ideal keys (usually start with ak_) work.
+    Legacy GETADDRESS_API_KEY is accepted when it looks like an Ideal key.
+    """
+    ideal = (os.environ.get('IDEAL_POSTCODES_API_KEY') or '').strip()
+    if ideal:
+        return ideal
+    legacy = (os.environ.get('GETADDRESS_API_KEY') or '').strip()
+    # Ideal keys are typically ak_... ; old getAddress keys are not usable anymore
+    if legacy.startswith('ak_'):
+        return legacy
+    return ''
+
+
 def getaddress_api_key() -> str:
-    """Royal Mail PAF lookup via getAddress.io — lists every address at a postcode."""
-    return (os.environ.get('GETADDRESS_API_KEY') or '').strip()
+    """Back-compat alias for Ideal Postcodes key."""
+    return ideal_postcodes_api_key()
 
 
 def address_lookup_enabled() -> bool:
-    return bool(google_maps_key() or getaddress_api_key())
+    return bool(google_maps_key() or ideal_postcodes_api_key())
+
+
+def paf_lookup_enabled() -> bool:
+    return bool(ideal_postcodes_api_key())
 
 
 def extract_postcode(text: str) -> str | None:
@@ -336,84 +357,135 @@ def _is_postcode_only_query(text: str) -> bool:
     return not bool(re.search(r'[A-Za-z]', remainder))
 
 
-def _clean_getaddress_csv(raw: str) -> str:
+def _clean_address_csv(raw: str) -> str:
     parts = [p.strip() for p in raw.split(',')]
     return ', '.join(p for p in parts if p)
 
 
-def _format_getaddress_expanded(addr: dict, postcode: str) -> tuple[str, str, str]:
-    """Return (display, main_text, secondary_text) from an expanded getAddress row."""
-    line1 = (addr.get('line_1') or '').strip()
-    line2 = (addr.get('line_2') or '').strip()
-    town = (addr.get('town_or_city') or addr.get('locality') or '').strip()
-    pc = normalise_postcode(postcode)
-    main = line1 or _clean_getaddress_csv(
-        ', '.join(addr.get('formatted_address') or [])
-    )
+def _format_paf_address(
+    *,
+    line1: str,
+    line2: str = '',
+    town: str = '',
+    postcode: str = '',
+) -> tuple[str, str, str]:
+    pc = normalise_postcode(postcode) if postcode else ''
+    main = (line1 or '').strip()
     secondary_bits = [b for b in [line2, town, pc] if b and b not in main]
     secondary = ', '.join(secondary_bits)
-    if line1 and town and pc:
-        display = f'{line1}, {town} · {pc}'
-    elif line1 and pc:
-        display = f'{line1} · {pc}'
+    if main and town and pc:
+        display = f'{main}, {town} · {pc}'
+    elif main and pc:
+        display = f'{main} · {pc}'
     else:
         display = f'{main} · {pc}' if pc else main
     return display[:255], main, secondary
 
 
-def getaddress_find_postcode(
+def _house_matches(house_filter: str, *, building_number: str, line1: str, display: str) -> bool:
+    """Match typed door number against a PAF row (exact, prefix, or contained)."""
+    filt = house_filter.strip().lower()
+    if not filt:
+        return True
+    bn = (building_number or '').strip().lower()
+    line = (line1 or '').strip().lower()
+    hay = f'{line} {display}'.lower()
+    if bn == filt or bn.startswith(filt):
+        return True
+    if line.startswith(filt) or f' {filt} ' in f' {hay} ':
+        return True
+    # "22" should match "22a" / "Flat 22"
+    if re.search(rf'(?:^|[\s,]){re.escape(filt)}[a-z]?\b', hay):
+        return True
+    return False
+
+
+def _suggestion_from_resolved(resolved: dict[str, Any]) -> dict[str, str]:
+    display = resolved['display']
+    return {
+        'place_id': '',
+        'description': display,
+        'main_text': display,
+        'secondary_text': 'Tap to select',
+        'lat': str(resolved['lat']),
+        'lng': str(resolved['lng']),
+        'display': display,
+        'source': resolved.get('source', 'resolved'),
+    }
+
+
+def ideal_find_postcode(
     postcode: str,
     *,
     house_filter: str | None = None,
 ) -> list[dict[str, str]]:
-    """
-    List every delivery point at a UK postcode (Royal Mail PAF via getAddress.io).
-
-    Google Places / Address Validation cannot do this — they do not expose PAF.
-    """
-    key = getaddress_api_key()
+    """List every delivery point at a UK postcode via Ideal Postcodes."""
+    key = ideal_postcodes_api_key()
     if not key:
         return []
 
     compact = re.sub(r'\s+', '', normalise_postcode(postcode))
-    url = f'https://api.getAddress.io/find/{requests.utils.quote(compact)}'
+    url = f'https://api.ideal-postcodes.co.uk/v1/postcodes/{requests.utils.quote(compact)}'
     try:
-        response = requests.get(
-            url,
-            params={'api-key': key, 'expand': 'true', 'sort': 'true'},
-            timeout=15,
-        )
-        if response.status_code == 404:
+        response = requests.get(url, params={'api_key': key}, timeout=15)
+        if response.status_code in (404, 401, 402, 403):
+            logger.info(
+                'Ideal Postcodes status=%s for %r',
+                response.status_code,
+                postcode,
+            )
             return []
         response.raise_for_status()
         data = response.json()
     except requests.RequestException:
-        logger.exception('getAddress find failed for %r', postcode)
+        logger.exception('Ideal Postcodes lookup failed for %r', postcode)
         return []
 
-    lat = data.get('latitude')
-    lng = data.get('longitude')
-    pc = data.get('postcode') or normalise_postcode(postcode)
+    # Native Ideal: { code, result: [ {...}, ... ] }
+    # Compat/getAddress style may nest differently
+    results = data.get('result')
+    if results is None and isinstance(data.get('addresses'), list):
+        results = data['addresses']
+    if not isinstance(results, list):
+        return []
+
     suggestions: list[dict[str, str]] = []
-    house_filter = (house_filter or '').strip().lower()
-
-    for addr in data.get('addresses') or []:
+    for addr in results:
         if isinstance(addr, str):
-            cleaned = _clean_getaddress_csv(addr)
-            display = f'{cleaned} · {pc}' if pc else cleaned
-            main = cleaned
-            secondary = pc
-            building_number = ''
+            cleaned = _clean_address_csv(addr)
+            pc = normalise_postcode(postcode)
+            display = f'{cleaned} · {pc}'
+            main, secondary, building_number = cleaned, pc, ''
+            lat = lng = None
         else:
-            display, main, secondary = _format_getaddress_expanded(addr, pc)
-            building_number = str(addr.get('building_number') or '').strip().lower()
+            line1 = (addr.get('line_1') or '').strip()
+            line2 = (addr.get('line_2') or '').strip()
+            town = (
+                addr.get('post_town')
+                or addr.get('town_or_city')
+                or addr.get('dependant_locality')
+                or ''
+            ).strip()
+            pc = (addr.get('postcode') or normalise_postcode(postcode)).strip()
+            display, main, secondary = _format_paf_address(
+                line1=line1,
+                line2=line2,
+                town=town,
+                postcode=pc,
+            )
+            building_number = str(
+                addr.get('building_number') or addr.get('building_name') or ''
+            ).strip()
+            lat = addr.get('latitude')
+            lng = addr.get('longitude')
 
-        if house_filter:
-            hay = f'{main} {display} {building_number}'.lower()
-            # Match "22", "22a", or leading digits the user typed
-            if house_filter not in hay and not building_number.startswith(house_filter):
-                if not main.lower().startswith(house_filter):
-                    continue
+        if not _house_matches(
+            house_filter or '',
+            building_number=building_number,
+            line1=main,
+            display=display,
+        ):
+            continue
 
         item: dict[str, str] = {
             'place_id': '',
@@ -421,7 +493,7 @@ def getaddress_find_postcode(
             'main_text': main,
             'secondary_text': secondary or 'Select address',
             'display': display,
-            'source': 'getaddress',
+            'source': 'ideal-postcodes',
         }
         if lat is not None and lng is not None:
             item['lat'] = str(lat)
@@ -431,11 +503,96 @@ def getaddress_find_postcode(
     return suggestions
 
 
+def getaddress_compat_find_postcode(
+    postcode: str,
+    *,
+    house_filter: str | None = None,
+) -> list[dict[str, str]]:
+    """
+    Ideal Postcodes getAddress-compatible find endpoint.
+    Only works with an Ideal Postcodes API key (getAddress.io itself is shut down).
+    """
+    key = ideal_postcodes_api_key()
+    if not key:
+        return []
+
+    compact = re.sub(r'\s+', '', normalise_postcode(postcode))
+    url = f'https://ga.ideal-postcodes.co.uk/find/{requests.utils.quote(compact)}'
+    try:
+        response = requests.get(
+            url,
+            params={'api-key': key, 'expand': 'true', 'sort': 'true'},
+            timeout=15,
+        )
+        if response.status_code in (404, 401, 402, 403):
+            return []
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException:
+        logger.exception('Ideal compat find failed for %r', postcode)
+        return []
+
+    lat = data.get('latitude')
+    lng = data.get('longitude')
+    pc = data.get('postcode') or normalise_postcode(postcode)
+    suggestions: list[dict[str, str]] = []
+
+    for addr in data.get('addresses') or []:
+        if isinstance(addr, str):
+            cleaned = _clean_address_csv(addr)
+            display = f'{cleaned} · {pc}' if pc else cleaned
+            main, secondary, building_number = cleaned, pc, ''
+        else:
+            display, main, secondary = _format_paf_address(
+                line1=(addr.get('line_1') or '').strip(),
+                line2=(addr.get('line_2') or '').strip(),
+                town=(addr.get('town_or_city') or addr.get('locality') or '').strip(),
+                postcode=pc,
+            )
+            building_number = str(addr.get('building_number') or '').strip()
+
+        if not _house_matches(
+            house_filter or '',
+            building_number=building_number,
+            line1=main,
+            display=display,
+        ):
+            continue
+
+        item: dict[str, str] = {
+            'place_id': '',
+            'description': display,
+            'main_text': main,
+            'secondary_text': secondary or 'Select address',
+            'display': display,
+            'source': 'ideal-compat',
+        }
+        if lat is not None and lng is not None:
+            item['lat'] = str(lat)
+            item['lng'] = str(lng)
+        suggestions.append(item)
+
+    return suggestions
+
+
+def paf_find_postcode(
+    postcode: str,
+    *,
+    house_filter: str | None = None,
+) -> list[dict[str, str]]:
+    """Try Ideal native, then getAddress-compat shim."""
+    found = ideal_find_postcode(postcode, house_filter=house_filter)
+    if found:
+        return found
+    return getaddress_compat_find_postcode(postcode, house_filter=house_filter)
+
+
 def address_autocomplete(query: str, *, session_token: str = '') -> list[dict[str, str]]:
     """
     Suggestions for the add-job field.
 
-    - Complete postcode (+ optional house number) → getAddress list of all premises
+    - Postcode (+ optional door number) → PAF list when Ideal Postcodes key is set
+    - Postcode + door number → Google resolve to full street address
     - Otherwise → Google Places (street / free-text)
     """
     search = query.strip()
@@ -443,11 +600,17 @@ def address_autocomplete(query: str, *, session_token: str = '') -> list[dict[st
         return []
 
     postcode, number = parse_postcode_and_number(search)
-    if postcode and getaddress_api_key() and _is_postcode_only_query(search):
-        found = getaddress_find_postcode(postcode, house_filter=number)
-        if found:
-            return found
-        # Fall through if getAddress empty / failed
+    if postcode and _is_postcode_only_query(search):
+        if ideal_postcodes_api_key():
+            found = paf_find_postcode(postcode, house_filter=number)
+            if found:
+                return found
+
+        # Door number without working PAF: resolve via Google geocode
+        if number:
+            resolved = geocode_postcode_with_number(postcode, number)
+            if resolved:
+                return [_suggestion_from_resolved(resolved)]
 
     return google_places_autocomplete(search, session_token=session_token)
 
@@ -489,7 +652,7 @@ def google_places_autocomplete(query: str, *, session_token: str = '') -> list[d
         logger.info('Places Autocomplete status=%s', data.get('status'))
         return []
 
-    suggestions = []
+    suggestions: list[dict[str, str]] = []
     for pred in data.get('predictions') or []:
         suggestions.append(
             {
@@ -502,22 +665,21 @@ def google_places_autocomplete(query: str, *, session_token: str = '') -> list[d
             }
         )
 
-    # If Places found nothing but we have postcode+number, synthesise a hint
-    # from geocoding so the UI still helps.
-    if not suggestions and postcode and number:
+    # Places often returns only the postcode for "22, WF16 9PF" — prefer a resolved
+    # full address when we know the door number.
+    if postcode and number:
         resolved = geocode_postcode_with_number(postcode, number)
         if resolved:
-            suggestions.append(
-                {
-                    'place_id': '',
-                    'description': resolved['display'],
-                    'main_text': resolved['display'],
-                    'secondary_text': 'Resolved address',
-                    'lat': str(resolved['lat']),
-                    'lng': str(resolved['lng']),
-                    'display': resolved['display'],
-                }
-            )
+            resolved_item = _suggestion_from_resolved(resolved)
+            # Drop vague postcode-only predictions that omit the house number
+            filtered = [
+                s
+                for s in suggestions
+                if number.lower() in (s.get('description') or '').lower()
+                or number.lower() in (s.get('main_text') or '').lower()
+            ]
+            return [resolved_item] + filtered
+
     return suggestions
 
 
