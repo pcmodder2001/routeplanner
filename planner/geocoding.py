@@ -80,7 +80,9 @@ def _parse_google_address_components(components: list[dict]) -> dict[str, str]:
     for comp in components:
         types = comp.get('types') or []
         name = comp.get('long_name') or ''
-        if 'route' in types:
+        if 'street_number' in types:
+            mapped['street_number'] = name
+        elif 'route' in types:
             mapped['road'] = name
         elif 'postal_town' in types or 'locality' in types:
             mapped.setdefault('place', name)
@@ -91,6 +93,60 @@ def _parse_google_address_components(components: list[dict]) -> dict[str, str]:
         elif 'postal_code' in types:
             mapped['postcode'] = name
     return mapped
+
+
+HOUSE_NUMBER_RE = re.compile(
+    r'\b(\d+[A-Za-z]?(?:\s*[-/]\s*\d+[A-Za-z]?)?)\b'
+)
+
+
+def parse_postcode_and_number(text: str) -> tuple[str | None, str | None]:
+    """
+    Pull a UK postcode and house number from free text.
+
+    Examples:
+      'Wf169pf 22'      -> ('WF16 9PF', '22')
+      '22 WF16 9PF'     -> ('WF16 9PF', '22')
+      '22, WF16 9PF'    -> ('WF16 9PF', '22')
+      'WF16 9PF'        -> ('WF16 9PF', None)
+    """
+    raw = text.strip()
+    postcode = extract_postcode(raw)
+    if not postcode:
+        return None, None
+
+    # Remove postcode (spaced or compact) from the string
+    remainder = re.sub(
+        re.escape(postcode).replace(r'\ ', r'\s*'),
+        ' ',
+        raw,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    remainder = re.sub(r'[,\s]+', ' ', remainder).strip()
+    if not remainder:
+        return postcode, None
+
+    match = HOUSE_NUMBER_RE.search(remainder)
+    if not match:
+        return postcode, None
+    return postcode, match.group(1).replace(' ', '')
+
+
+def format_full_address(
+    *,
+    street_number: str = '',
+    road: str = '',
+    place: str = '',
+    postcode: str = '',
+) -> str:
+    line = ' '.join(p for p in [street_number, road] if p).strip()
+    bits = [b for b in [line, place, postcode] if b]
+    if line and place and postcode:
+        return f'{line}, {place} · {postcode}'
+    if line and postcode:
+        return f'{line} · {postcode}'
+    return ', '.join(bits)
 
 
 def google_geocode(query: str) -> dict[str, Any] | None:
@@ -125,11 +181,19 @@ def google_geocode(query: str) -> dict[str, Any] | None:
 
     parts = _parse_google_address_components(hit.get('address_components') or [])
     formatted = hit.get('formatted_address') or query
+    street_number = parts.get('street_number', '')
     road = parts.get('road', '')
     place = parts.get('place') or parts.get('district') or ''
     postcode = parts.get('postcode') or extract_postcode(formatted) or ''
 
-    if looks_like_postcode(query) and (road or place):
+    if street_number and road:
+        display = format_full_address(
+            street_number=street_number,
+            road=road,
+            place=place,
+            postcode=postcode,
+        )
+    elif looks_like_postcode(query) and (road or place):
         display = format_postcode_display(
             postcode or query,
             road=road,
@@ -145,8 +209,72 @@ def google_geocode(query: str) -> dict[str, Any] | None:
         'road': road,
         'place': place,
         'postcode': postcode,
+        'street_number': street_number,
         'source': 'google',
     }
+
+
+def geocode_postcode_with_number(postcode: str, number: str) -> dict[str, Any] | None:
+    """
+    Resolve '22 + WF16 9PF' style input to a full premise address.
+
+    Google often ignores the number on postcode-only queries, so we:
+    1) geocode the postcode to learn the street
+    2) geocode '{number} {street}, {postcode}'
+    """
+    base = geocode_postcode(postcode) if not google_maps_key() else google_geocode(postcode)
+    if not base:
+        base = geocode_postcode(postcode)
+    if not base:
+        return None
+
+    road = base.get('road') or ''
+    place = base.get('place') or ''
+    pc = base.get('postcode') or normalise_postcode(postcode)
+
+    candidates = []
+    if road:
+        candidates.append(f'{number} {road}, {pc}')
+        if place:
+            candidates.append(f'{number} {road}, {place}, {pc}')
+    candidates.append(f'{number}, {pc}')
+    candidates.append(f'{number} {pc}')
+
+    for query in candidates:
+        result = google_geocode(query)
+        if not result:
+            continue
+        # Prefer results that actually resolved a street number
+        if result.get('street_number') or (
+            result.get('road') and number.lower() in (result.get('display') or '').lower()
+        ):
+            if not result.get('street_number'):
+                result = {
+                    **result,
+                    'street_number': number,
+                    'display': format_full_address(
+                        street_number=number,
+                        road=result.get('road') or road,
+                        place=result.get('place') or place,
+                        postcode=result.get('postcode') or pc,
+                    )[:255],
+                }
+            return result
+
+    # Fall back: keep postcode location but label with the number + street we know
+    if road:
+        return {
+            **base,
+            'street_number': number,
+            'display': format_full_address(
+                street_number=number,
+                road=road,
+                place=place,
+                postcode=pc,
+            )[:255],
+            'source': base.get('source', 'google'),
+        }
+    return base
 
 
 def google_reverse(lat: float, lng: float) -> dict[str, str] | None:
@@ -187,8 +315,14 @@ def google_places_autocomplete(query: str, *, session_token: str = '') -> list[d
     if not key or len(query.strip()) < 3:
         return []
 
+    search = query.strip()
+    postcode, number = parse_postcode_and_number(search)
+    # Rewrite "WF169PF 22" into something Google Places resolves better
+    if postcode and number:
+        search = f'{number}, {postcode}'
+
     params = {
-        'input': query.strip(),
+        'input': search,
         'components': 'country:gb',
         'types': 'geocode',
         'key': key,
@@ -224,6 +358,23 @@ def google_places_autocomplete(query: str, *, session_token: str = '') -> list[d
                 ),
             }
         )
+
+    # If Places found nothing but we have postcode+number, synthesise a hint
+    # from geocoding so the UI still helps.
+    if not suggestions and postcode and number:
+        resolved = geocode_postcode_with_number(postcode, number)
+        if resolved:
+            suggestions.append(
+                {
+                    'place_id': '',
+                    'description': resolved['display'],
+                    'main_text': resolved['display'],
+                    'secondary_text': 'Resolved address',
+                    'lat': str(resolved['lat']),
+                    'lng': str(resolved['lng']),
+                    'display': resolved['display'],
+                }
+            )
     return suggestions
 
 
@@ -415,10 +566,16 @@ def geocode_nominatim(query: str) -> dict[str, Any] | None:
 
 
 def geocode_location(location: str) -> dict[str, Any] | None:
-    """Geocode a postcode or free-text UK address."""
+    """Geocode a postcode, postcode+number, or free-text UK address."""
     text = location.strip()
     if not text:
         return None
+
+    postcode, number = parse_postcode_and_number(text)
+    if postcode and number:
+        result = geocode_postcode_with_number(postcode, number)
+        if result:
+            return result
 
     # Google first when keyed — handles addresses and postcodes well
     if google_maps_key():
@@ -429,7 +586,6 @@ def geocode_location(location: str) -> dict[str, Any] | None:
     if looks_like_postcode(text):
         return geocode_postcode(text)
 
-    postcode = extract_postcode(text)
     if postcode and looks_like_postcode(postcode):
         result = geocode_postcode(postcode)
         if result:

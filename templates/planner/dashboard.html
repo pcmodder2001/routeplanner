@@ -53,7 +53,7 @@
       {{ job_form.notes }}
       <button type="submit" class="btn btn-primary">Add job</button>
       {% if google_places_enabled %}
-      <p class="meta">Type an address or postcode — Google suggestions will appear.</p>
+      <p class="meta">Try <code>WF16 9PF 22</code> or start typing a street — Google will resolve the full address.</p>
       {% endif %}
     </form>
 
@@ -229,6 +229,16 @@
 
   function pickSuggestion(item) {
     if (!locationInput) return;
+    // Synthetic resolved suggestion (postcode + house number) may already include coords
+    if (!item.place_id && item.lat && item.lng) {
+      locationInput.value = item.display || item.description;
+      if (placeLat) placeLat.value = item.lat;
+      if (placeLng) placeLng.value = item.lng;
+      if (placeDisplay) placeDisplay.value = item.display || item.description;
+      hideSuggestions();
+      return;
+    }
+    if (!item.place_id) return;
     fetch('/places/details/?place_id=' + encodeURIComponent(item.place_id) +
           '&token=' + encodeURIComponent(sessionToken))
       .then(function (r) { return r.json(); })

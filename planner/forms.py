@@ -22,7 +22,7 @@ class JobForm(forms.ModelForm):
             'location': forms.TextInput(
                 attrs={
                     'class': 'input',
-                    'placeholder': 'Address or postcode, e.g. SW1A 1AA',
+                    'placeholder': 'Postcode, e.g. WF16 9PF 22 — or full address',
                     'autofocus': True,
                 }
             ),
