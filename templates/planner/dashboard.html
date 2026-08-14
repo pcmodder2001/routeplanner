@@ -52,8 +52,10 @@
       {{ job_form.reference }}
       {{ job_form.notes }}
       <button type="submit" class="btn btn-primary">Add job</button>
-      {% if google_places_enabled %}
-      <p class="meta">Try <code>WF16 9PF 22</code> or start typing a street — Google will resolve the full address.</p>
+      {% if getaddress_enabled %}
+      <p class="meta">Enter a postcode (e.g. <code>WF16 9PF</code>) and pick the address from the list.</p>
+      {% elif google_places_enabled %}
+      <p class="meta">Try <code>WF16 9PF 22</code> or start typing a street. Add a <code>GETADDRESS_API_KEY</code> for full postcode address lists.</p>
       {% endif %}
     </form>
 
@@ -211,7 +213,7 @@
   const placeLat = document.getElementById('place_lat');
   const placeLng = document.getElementById('place_lng');
   const placeDisplay = document.getElementById('place_display');
-  const placesEnabled = {{ google_places_enabled|yesno:"true,false" }};
+  const lookupEnabled = {{ address_lookup_enabled|yesno:"true,false" }};
   let suggestTimer = null;
   let sessionToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
@@ -227,9 +229,17 @@
     suggestBox.innerHTML = '';
   }
 
+  function escapeHtml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   function pickSuggestion(item) {
     if (!locationInput) return;
-    // Synthetic resolved suggestion (postcode + house number) may already include coords
+    // getAddress / synthetic rows already include coords
     if (!item.place_id && item.lat && item.lng) {
       locationInput.value = item.display || item.description;
       if (placeLat) placeLat.value = item.lat;
@@ -238,7 +248,13 @@
       hideSuggestions();
       return;
     }
-    if (!item.place_id) return;
+    if (!item.place_id) {
+      // Address-only pick without coords — still fill the field
+      locationInput.value = item.display || item.description;
+      if (placeDisplay) placeDisplay.value = item.display || item.description;
+      hideSuggestions();
+      return;
+    }
     fetch('/places/details/?place_id=' + encodeURIComponent(item.place_id) +
           '&token=' + encodeURIComponent(sessionToken))
       .then(function (r) { return r.json(); })
@@ -266,15 +282,15 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'suggest-item';
-      btn.innerHTML = '<strong>' + (item.main_text || item.description) + '</strong>' +
-        (item.secondary_text ? '<span>' + item.secondary_text + '</span>' : '');
+      btn.innerHTML = '<strong>' + escapeHtml(item.main_text || item.description) + '</strong>' +
+        (item.secondary_text ? '<span>' + escapeHtml(item.secondary_text) + '</span>' : '');
       btn.addEventListener('click', function () { pickSuggestion(item); });
       suggestBox.appendChild(btn);
     });
     suggestBox.hidden = false;
   }
 
-  if (placesEnabled && locationInput && suggestBox) {
+  if (lookupEnabled && locationInput && suggestBox) {
     locationInput.addEventListener('input', function () {
       clearPlacePick();
       const q = locationInput.value.trim();

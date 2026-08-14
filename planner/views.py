@@ -5,10 +5,13 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .forms import AppointmentTypeForm, JobForm, JobNotesForm, SettingsForm
 from .geocoding import (
+    address_autocomplete,
+    address_lookup_enabled,
     geocode_location,
+    getaddress_api_key,
+    google_geocode,
     google_maps_key,
     google_place_details,
-    google_places_autocomplete,
 )
 from .models import DayRoute, EngineerSettings, Job
 from .osrm import active_routing_label
@@ -159,6 +162,8 @@ def dashboard(request):
         'route_source_label': source_label,
         'routing_provider': active_routing_label(),
         'google_places_enabled': bool(google_maps_key()),
+        'getaddress_enabled': bool(getaddress_api_key()),
+        'address_lookup_enabled': address_lookup_enabled(),
     }
     return render(request, 'planner/dashboard.html', context)
 
@@ -167,10 +172,16 @@ def dashboard(request):
 def places_autocomplete(request):
     query = (request.GET.get('q') or '').strip()
     token = (request.GET.get('token') or '').strip()
-    if not google_maps_key():
+    if not address_lookup_enabled():
         return JsonResponse({'suggestions': [], 'enabled': False})
-    suggestions = google_places_autocomplete(query, session_token=token)
-    return JsonResponse({'suggestions': suggestions, 'enabled': True})
+    suggestions = address_autocomplete(query, session_token=token)
+    return JsonResponse(
+        {
+            'suggestions': suggestions,
+            'enabled': True,
+            'getaddress': bool(getaddress_api_key()),
+        }
+    )
 
 
 @require_GET
@@ -200,6 +211,13 @@ def add_job(request):
                 job.lat = float(place_lat)
                 job.lng = float(place_lng)
                 job.geocode_display = (place_display or job.location)[:255]
+                # Prefer rooftop pin when Google can resolve the selected full address
+                if place_display and google_maps_key():
+                    refined = google_geocode(place_display.replace(' · ', ', '))
+                    if refined and refined.get('lat') is not None:
+                        job.lat = refined['lat']
+                        job.lng = refined['lng']
+                        job.geocode_display = refined['display'][:255]
                 messages.success(request, f'Added {job.geocode_display}')
             except ValueError:
                 place_lat = place_lng = ''

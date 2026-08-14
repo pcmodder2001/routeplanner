@@ -30,6 +30,15 @@ def google_maps_key() -> str:
     return (os.environ.get('GOOGLE_MAPS_API_KEY') or '').strip()
 
 
+def getaddress_api_key() -> str:
+    """Royal Mail PAF lookup via getAddress.io — lists every address at a postcode."""
+    return (os.environ.get('GETADDRESS_API_KEY') or '').strip()
+
+
+def address_lookup_enabled() -> bool:
+    return bool(google_maps_key() or getaddress_api_key())
+
+
 def extract_postcode(text: str) -> str | None:
     match = UK_POSTCODE_FIND_RE.search(text.strip())
     if not match:
@@ -307,6 +316,140 @@ def google_reverse(lat: float, lng: float) -> dict[str, str] | None:
     if not road and not place:
         return None
     return {'road': road, 'place': place}
+
+
+def _is_postcode_only_query(text: str) -> bool:
+    """True when input is a postcode, optionally with a house number — no street name."""
+    postcode, number = parse_postcode_and_number(text)
+    if not postcode:
+        return False
+    remainder = re.sub(
+        re.escape(postcode).replace(r'\ ', r'\s*'),
+        ' ',
+        text.strip(),
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if number:
+        remainder = re.sub(re.escape(number), ' ', remainder, count=1, flags=re.IGNORECASE)
+    remainder = re.sub(r'[,\s]+', ' ', remainder).strip()
+    return not bool(re.search(r'[A-Za-z]', remainder))
+
+
+def _clean_getaddress_csv(raw: str) -> str:
+    parts = [p.strip() for p in raw.split(',')]
+    return ', '.join(p for p in parts if p)
+
+
+def _format_getaddress_expanded(addr: dict, postcode: str) -> tuple[str, str, str]:
+    """Return (display, main_text, secondary_text) from an expanded getAddress row."""
+    line1 = (addr.get('line_1') or '').strip()
+    line2 = (addr.get('line_2') or '').strip()
+    town = (addr.get('town_or_city') or addr.get('locality') or '').strip()
+    pc = normalise_postcode(postcode)
+    main = line1 or _clean_getaddress_csv(
+        ', '.join(addr.get('formatted_address') or [])
+    )
+    secondary_bits = [b for b in [line2, town, pc] if b and b not in main]
+    secondary = ', '.join(secondary_bits)
+    if line1 and town and pc:
+        display = f'{line1}, {town} · {pc}'
+    elif line1 and pc:
+        display = f'{line1} · {pc}'
+    else:
+        display = f'{main} · {pc}' if pc else main
+    return display[:255], main, secondary
+
+
+def getaddress_find_postcode(
+    postcode: str,
+    *,
+    house_filter: str | None = None,
+) -> list[dict[str, str]]:
+    """
+    List every delivery point at a UK postcode (Royal Mail PAF via getAddress.io).
+
+    Google Places / Address Validation cannot do this — they do not expose PAF.
+    """
+    key = getaddress_api_key()
+    if not key:
+        return []
+
+    compact = re.sub(r'\s+', '', normalise_postcode(postcode))
+    url = f'https://api.getAddress.io/find/{requests.utils.quote(compact)}'
+    try:
+        response = requests.get(
+            url,
+            params={'api-key': key, 'expand': 'true', 'sort': 'true'},
+            timeout=15,
+        )
+        if response.status_code == 404:
+            return []
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException:
+        logger.exception('getAddress find failed for %r', postcode)
+        return []
+
+    lat = data.get('latitude')
+    lng = data.get('longitude')
+    pc = data.get('postcode') or normalise_postcode(postcode)
+    suggestions: list[dict[str, str]] = []
+    house_filter = (house_filter or '').strip().lower()
+
+    for addr in data.get('addresses') or []:
+        if isinstance(addr, str):
+            cleaned = _clean_getaddress_csv(addr)
+            display = f'{cleaned} · {pc}' if pc else cleaned
+            main = cleaned
+            secondary = pc
+            building_number = ''
+        else:
+            display, main, secondary = _format_getaddress_expanded(addr, pc)
+            building_number = str(addr.get('building_number') or '').strip().lower()
+
+        if house_filter:
+            hay = f'{main} {display} {building_number}'.lower()
+            # Match "22", "22a", or leading digits the user typed
+            if house_filter not in hay and not building_number.startswith(house_filter):
+                if not main.lower().startswith(house_filter):
+                    continue
+
+        item: dict[str, str] = {
+            'place_id': '',
+            'description': display,
+            'main_text': main,
+            'secondary_text': secondary or 'Select address',
+            'display': display,
+            'source': 'getaddress',
+        }
+        if lat is not None and lng is not None:
+            item['lat'] = str(lat)
+            item['lng'] = str(lng)
+        suggestions.append(item)
+
+    return suggestions
+
+
+def address_autocomplete(query: str, *, session_token: str = '') -> list[dict[str, str]]:
+    """
+    Suggestions for the add-job field.
+
+    - Complete postcode (+ optional house number) → getAddress list of all premises
+    - Otherwise → Google Places (street / free-text)
+    """
+    search = query.strip()
+    if len(search) < 3:
+        return []
+
+    postcode, number = parse_postcode_and_number(search)
+    if postcode and getaddress_api_key() and _is_postcode_only_query(search):
+        found = getaddress_find_postcode(postcode, house_filter=number)
+        if found:
+            return found
+        # Fall through if getAddress empty / failed
+
+    return google_places_autocomplete(search, session_token=session_token)
 
 
 def google_places_autocomplete(query: str, *, session_token: str = '') -> list[dict[str, str]]:

@@ -440,7 +440,7 @@ a { color: var(--primary); }
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: var(--shadow);
-  max-height: 240px;
+  max-height: 320px;
   overflow: auto;
 }
 
