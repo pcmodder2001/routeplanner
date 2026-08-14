@@ -21,9 +21,11 @@ class JobForm(forms.ModelForm):
             ),
             'location': forms.TextInput(
                 attrs={
-                    'class': 'input',
-                    'placeholder': 'Address, postcode, or business — e.g. WF12 8AJ Esso',
+                    'class': 'input input-caps',
+                    'placeholder': 'ADDRESS, POSTCODE, OR BUSINESS — E.G. WF12 8AJ ESSO',
                     'autofocus': True,
+                    'autocapitalize': 'characters',
+                    'spellcheck': 'false',
                 }
             ),
             'appointment_type': forms.Select(attrs={'class': 'input'}),
@@ -35,6 +37,9 @@ class JobForm(forms.ModelForm):
                 }
             ),
         }
+
+    def clean_location(self):
+        return (self.cleaned_data.get('location') or '').strip().upper()
 
 
 class AppointmentTypeForm(forms.ModelForm):

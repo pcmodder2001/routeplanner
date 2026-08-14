@@ -183,6 +183,10 @@ a { color: var(--primary); }
   border-color: var(--primary);
 }
 
+.input-caps {
+  text-transform: uppercase;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

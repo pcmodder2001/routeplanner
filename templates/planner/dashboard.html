@@ -235,21 +235,34 @@
       .replace(/"/g, '&quot;');
   }
 
+  function forceCaps(el) {
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const upper = el.value.toUpperCase();
+    if (el.value !== upper) {
+      el.value = upper;
+      if (typeof start === 'number' && typeof end === 'number') {
+        el.setSelectionRange(start, end);
+      }
+    }
+  }
+
   function pickSuggestion(item) {
     if (!locationInput) return;
     // getAddress / synthetic rows already include coords
     if (!item.place_id && item.lat && item.lng) {
-      locationInput.value = item.display || item.description;
+      locationInput.value = (item.display || item.description || '').toUpperCase();
       if (placeLat) placeLat.value = item.lat;
       if (placeLng) placeLng.value = item.lng;
-      if (placeDisplay) placeDisplay.value = item.display || item.description;
+      if (placeDisplay) placeDisplay.value = (item.display || item.description || '').toUpperCase();
       hideSuggestions();
       return;
     }
     if (!item.place_id) {
       // Address-only pick without coords — still fill the field
-      locationInput.value = item.display || item.description;
-      if (placeDisplay) placeDisplay.value = item.display || item.description;
+      locationInput.value = (item.display || item.description || '').toUpperCase();
+      if (placeDisplay) placeDisplay.value = (item.display || item.description || '').toUpperCase();
       hideSuggestions();
       return;
     }
@@ -259,10 +272,11 @@
       .then(function (data) {
         if (!data.ok || !data.place) return;
         const p = data.place;
-        locationInput.value = p.display || item.description;
+        const label = (p.display || item.description || '').toUpperCase();
+        locationInput.value = label;
         if (placeLat) placeLat.value = p.lat;
         if (placeLng) placeLng.value = p.lng;
-        if (placeDisplay) placeDisplay.value = p.display || item.description;
+        if (placeDisplay) placeDisplay.value = label;
         hideSuggestions();
         sessionToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
       })
@@ -288,11 +302,14 @@
     suggestBox.hidden = false;
   }
 
-  if (lookupEnabled && locationInput && suggestBox) {
+  if (locationInput) {
+    forceCaps(locationInput);
     locationInput.addEventListener('input', function () {
+      forceCaps(locationInput);
       clearPlacePick();
       const q = locationInput.value.trim();
       clearTimeout(suggestTimer);
+      if (!lookupEnabled || !suggestBox) return;
       if (q.length < 3) {
         hideSuggestions();
         return;
@@ -305,11 +322,13 @@
           .catch(function () { hideSuggestions(); });
       }, 220);
     });
-    document.addEventListener('click', function (e) {
-      if (!suggestBox.contains(e.target) && e.target !== locationInput) {
-        hideSuggestions();
-      }
-    });
+    if (lookupEnabled && suggestBox) {
+      document.addEventListener('click', function (e) {
+        if (!suggestBox.contains(e.target) && e.target !== locationInput) {
+          hideSuggestions();
+        }
+      });
+    }
   }
 
   // --- Map ---
