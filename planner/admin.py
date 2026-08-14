@@ -10,12 +10,12 @@ class JobAdmin(admin.ModelAdmin):
         'reference',
         'location',
         'appointment_type',
+        'status',
         'route_order',
         'estimated_arrival',
-        'leg_miles_from_previous',
         'leg_minutes_from_previous',
     )
-    list_filter = ('job_date', 'appointment_type')
+    list_filter = ('job_date', 'appointment_type', 'status')
     search_fields = ('location', 'reference', 'notes')
 
 
@@ -26,4 +26,11 @@ class EngineerSettingsAdmin(admin.ModelAdmin):
 
 @admin.register(DayRoute)
 class DayRouteAdmin(admin.ModelAdmin):
-    list_display = ('job_date', 'total_miles', 'total_minutes', 'source', 'updated_at')
+    list_display = (
+        'job_date',
+        'total_miles',
+        'total_minutes',
+        'source',
+        'order_locked',
+        'updated_at',
+    )

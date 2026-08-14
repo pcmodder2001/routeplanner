@@ -7,8 +7,7 @@
   <div>
     <h1>Today's route</h1>
     <p class="lede">
-      AM first (8am–1pm), PM after (1pm–6pm), all-day slotted where the route is shortest.
-      Clear the route in the evening, then build tomorrow's list in the morning.
+      AM first, PM after, all-day slotted to fit. Drag to lock your own order. Mark done/skip as you go.
     </p>
   </div>
 </section>
@@ -21,6 +20,19 @@
 <div class="banner banner-ok">
   Starting from <strong>{{ settings.start_display|default:settings.start_location }}</strong>
   · <a href="{% url 'settings' %}">change</a>
+</div>
+{% endif %}
+
+{% if next_nav_url %}
+<div class="next-bar">
+  <div>
+    <div class="next-label">Next stop</div>
+    <strong>{{ next_job.geocode_display|default:next_job.location }}</strong>
+    {% if next_job.estimated_arrival %}
+    <span class="meta">ETA ~{{ next_job.estimated_arrival|time:"H:i" }} · {{ next_job.leg_minutes_from_previous }} min drive</span>
+    {% endif %}
+  </div>
+  <a class="btn btn-accent" href="{{ next_nav_url }}" target="_blank" rel="noopener">Navigate</a>
 </div>
 {% endif %}
 
@@ -39,14 +51,21 @@
     <div class="actions-row">
       <form method="post" action="{% url 'plan_route' %}">
         {% csrf_token %}
-        <button type="submit" class="btn btn-accent" {% if not jobs %}disabled{% endif %}>
+        <button type="submit" class="btn btn-accent" {% if not pending_count %}disabled{% endif %}>
           {% if has_route %}Re-plan route{% else %}Plan best route{% endif %}
         </button>
       </form>
       {% if maps_url %}
-      <a class="btn btn-ghost" href="{{ maps_url }}" target="_blank" rel="noopener">Open in Google Maps</a>
+      <a class="btn btn-ghost" href="{{ maps_url }}" target="_blank" rel="noopener">Full day in Maps</a>
       {% endif %}
     </div>
+
+    {% if order_locked %}
+    <form method="post" action="{% url 'unlock_order' %}" class="stack" style="margin-top:0.75rem">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-ghost">Unlock order (allow auto plan)</button>
+    </form>
+    {% endif %}
 
     {% if jobs %}
     <form method="post" action="{% url 'clear_route' %}" onsubmit="return confirm('Clear the whole route and remove all jobs?');">
@@ -57,8 +76,8 @@
 
     {% if has_route %}
     <div class="stat-line">
-      <span>{{ planned_count }} stops</span>
-      <span>{{ total_miles }} mi · {{ total_minutes }} min driving</span>
+      <span>{{ planned_count }} pending</span>
+      <span>{{ total_miles }} mi · {{ total_minutes }} min</span>
     </div>
     {% endif %}
   </aside>
@@ -67,20 +86,28 @@
     <div class="panel-head">
       <h2>Route</h2>
       {% if has_route %}
-      <span class="pill">{% if route_source == 'osrm' %}Road route{% else %}Ordered{% endif %}</span>
+      <span class="pill">{% if order_locked %}Manual order{% else %}{{ route_source_label|default:"Ordered" }}{% endif %}</span>
       {% else %}
       <span class="pill pill-muted">Not planned yet</span>
       {% endif %}
     </div>
 
     {% if jobs %}
-    <ol class="job-list">
+    <p class="meta drag-hint">Drag pending jobs to set your own order (locks auto-routing).</p>
+    <ol class="job-list" id="job-list">
       {% for row in job_rows %}
       {% with job=row.job %}
-      <li class="job-card type-{{ job.appointment_type }}">
+      <li class="job-card type-{{ job.appointment_type }} status-{{ job.status }}"
+          data-id="{{ job.pk }}"
+          data-status="{{ job.status }}"
+          {% if job.status == 'pending' %}draggable="true"{% endif %}>
         <div class="job-order">
-          {% if job.route_order %}
+          {% if job.status == 'pending' and job.route_order %}
           <span class="order-num">{{ job.route_order }}</span>
+          {% elif job.status == 'done' %}
+          <span class="order-num done">✓</span>
+          {% elif job.status == 'skipped' %}
+          <span class="order-num skipped">–</span>
           {% else %}
           <span class="order-num muted">–</span>
           {% endif %}
@@ -88,16 +115,34 @@
         <div class="job-body">
           <div class="job-top">
             <strong>{% if job.geocode_display %}{{ job.geocode_display }}{% else %}{{ job.location }}{% endif %}</strong>
+            <span class="tag tag-{{ job.appointment_type }}">{{ job.appointment_short }}</span>
+            {% if job.status != 'pending' %}
+            <span class="tag tag-status">{{ job.get_status_display }}</span>
+            {% endif %}
           </div>
           {% if job.geocode_display and job.location|upper != job.geocode_display|upper %}
           <div class="meta">Entered: {{ job.location }}</div>
           {% endif %}
           <div class="meta-row">
             {% if job.reference %}<span>Ref: {{ job.reference }}</span>{% endif %}
-            {% if job.estimated_arrival %}<span>ETA ~{{ job.estimated_arrival|time:"H:i" }}</span>{% endif %}
-            {% if job.leg_minutes_from_previous != None %}<span>{{ job.leg_minutes_from_previous }} min drive</span>{% endif %}
-            {% if job.leg_miles_from_previous != None %}<span>{{ job.leg_miles_from_previous }} mi</span>{% endif %}
+            {% if job.status == 'pending' and job.estimated_arrival %}<span>ETA ~{{ job.estimated_arrival|time:"H:i" }}</span>{% endif %}
+            {% if job.status == 'pending' and job.leg_minutes_from_previous != None %}<span>{{ job.leg_minutes_from_previous }} min drive</span>{% endif %}
+            {% if job.status == 'pending' and job.leg_miles_from_previous != None %}<span>{{ job.leg_miles_from_previous }} mi</span>{% endif %}
             {% if not job.is_geocoded %}<span class="warn">Not located</span>{% endif %}
+          </div>
+
+          {% if job.status == 'pending' %}
+          <div class="job-toolbar">
+            <form method="post" action="{% url 'mark_job' job.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="done">
+              <button type="submit" class="btn btn-tiny btn-done">Done</button>
+            </form>
+            <form method="post" action="{% url 'mark_job' job.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="skip">
+              <button type="submit" class="btn btn-tiny">Skip</button>
+            </form>
           </div>
 
           <form method="post" action="{% url 'update_appointment' job.pk %}" class="inline-edit">
@@ -108,6 +153,13 @@
             </label>
             <button type="submit" class="btn btn-tiny">Update</button>
           </form>
+          {% else %}
+          <form method="post" action="{% url 'mark_job' job.pk %}" class="job-toolbar">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="reopen">
+            <button type="submit" class="btn btn-tiny">Reopen</button>
+          </form>
+          {% endif %}
 
           <form method="post" action="{% url 'update_notes' job.pk %}" class="notes-edit">
             {% csrf_token %}
@@ -123,6 +175,10 @@
       {% endwith %}
       {% endfor %}
     </ol>
+    <form id="reorder-form" method="post" action="{% url 'reorder_jobs' %}" class="hidden">
+      {% csrf_token %}
+      <input type="hidden" name="order" id="reorder-input" value="">
+    </form>
     {% else %}
     <div class="empty">
       <p>No jobs yet.</p>
@@ -153,46 +209,82 @@
 
   if (!points.length) {
     map.setView([54.5, -2.5], 6);
-    return;
+  } else {
+    const colours = {
+      START: '#1f3d2a',
+      AM: '#0b6e4f',
+      PM: '#b45309',
+      ALLDAY: '#1d4ed8'
+    };
+    const latLngs = [];
+    points.forEach(function (p) {
+      const ll = [p.lat, p.lng];
+      latLngs.push(ll);
+      const colour = colours[p.type] || '#333';
+      const marker = L.circleMarker(ll, {
+        radius: p.type === 'START' ? 8 : 10,
+        color: '#fff',
+        weight: 2,
+        fillColor: colour,
+        fillOpacity: 1
+      }).addTo(map);
+      const title = p.type === 'START'
+        ? p.label
+        : '#' + p.order + ' · ' + p.label + ' (' + p.type + ')';
+      marker.bindPopup(title);
+    });
+    const path = (geometry && geometry.length > 1) ? geometry : latLngs;
+    if (path.length > 1) {
+      L.polyline(path, {
+        color: '#1f3d2a',
+        weight: 4,
+        opacity: 0.85,
+        lineJoin: 'round'
+      }).addTo(map);
+      map.fitBounds(path, { padding: [36, 36] });
+    } else {
+      map.fitBounds(latLngs, { padding: [36, 36] });
+    }
   }
 
-  const colours = {
-    START: '#1f3d2a',
-    AM: '#0b6e4f',
-    PM: '#b45309',
-    ALLDAY: '#1d4ed8'
-  };
+  // Drag reorder for pending jobs
+  const list = document.getElementById('job-list');
+  const form = document.getElementById('reorder-form');
+  const input = document.getElementById('reorder-input');
+  if (!list || !form || !input) return;
 
-  const latLngs = [];
-  points.forEach(function (p) {
-    const ll = [p.lat, p.lng];
-    latLngs.push(ll);
-    const colour = colours[p.type] || '#333';
-    const marker = L.circleMarker(ll, {
-      radius: p.type === 'START' ? 8 : 10,
-      color: '#fff',
-      weight: 2,
-      fillColor: colour,
-      fillOpacity: 1
-    }).addTo(map);
-    const title = p.type === 'START'
-      ? p.label
-      : '#' + p.order + ' · ' + p.label + ' (' + p.type + ')';
-    marker.bindPopup(title);
+  let dragEl = null;
+  list.querySelectorAll('.job-card[draggable="true"]').forEach(function (card) {
+    card.addEventListener('dragstart', function (e) {
+      dragEl = card;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', function () {
+      card.classList.remove('dragging');
+      dragEl = null;
+      const ids = Array.from(list.querySelectorAll('.job-card[data-status="pending"]'))
+        .map(function (el) { return el.getAttribute('data-id'); });
+      input.value = ids.join(',');
+      form.submit();
+    });
   });
 
-  const path = (geometry && geometry.length > 1) ? geometry : latLngs;
-  if (path.length > 1) {
-    L.polyline(path, {
-      color: '#1f3d2a',
-      weight: 4,
-      opacity: 0.85,
-      lineJoin: 'round'
-    }).addTo(map);
-    map.fitBounds(path, { padding: [36, 36] });
-  } else {
-    map.fitBounds(latLngs, { padding: [36, 36] });
-  }
+  list.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    const after = Array.from(list.querySelectorAll('.job-card[data-status="pending"]:not(.dragging)'))
+      .find(function (el) {
+        const box = el.getBoundingClientRect();
+        return e.clientY < box.top + box.height / 2;
+      });
+    if (!dragEl) return;
+    if (after) list.insertBefore(dragEl, after);
+    else {
+      const firstFinished = list.querySelector('.job-card:not([data-status="pending"])');
+      if (firstFinished) list.insertBefore(dragEl, firstFinished);
+      else list.appendChild(dragEl);
+    }
+  });
 })();
 </script>
 {% endblock %}

@@ -334,20 +334,6 @@ def estimate_arrivals(
     return arrivals
 
 
-def clear_current_route(*, clear_jobs: bool = False) -> None:
-    """Reset planned order/geometry. Optionally wipe all jobs (evening clear)."""
-    if clear_jobs:
-        Job.objects.all().delete()
-    else:
-        Job.objects.all().update(
-            route_order=None,
-            estimated_arrival=None,
-            leg_miles_from_previous=None,
-            leg_minutes_from_previous=None,
-        )
-    DayRoute.objects.all().delete()
-
-
 def ensure_geocoded(jobs: Iterable[Job]) -> list[str]:
     """Resolve coords + street names. Refresh postcode jobs so labels stay accurate."""
     from .geocoding import looks_like_postcode
@@ -389,123 +375,81 @@ def ensure_start_geocoded(settings: EngineerSettings) -> str | None:
     return None
 
 
-def plan_current_route() -> RoutePlan:
-    """Plan the best route for all jobs currently in the list."""
-    settings = EngineerSettings.get_solo()
-    warnings: list[str] = []
-    route_date = timezone.localdate()
-
-    start_warning = ensure_start_geocoded(settings)
-    if start_warning:
-        warnings.append(start_warning)
-
-    jobs = list(Job.objects.all())
-    warnings.extend(ensure_geocoded(jobs))
-
-    geocoded = [j for j in jobs if j.is_geocoded]
-    if not geocoded:
-        clear_current_route(clear_jobs=False)
-        return RoutePlan(
-            stops=[],
-            total_miles=0.0,
-            total_minutes=0,
-            job_count=0,
-            warnings=warnings,
-            geometry=[],
-            source='',
+def clear_current_route(*, clear_jobs: bool = False) -> None:
+    """Reset planned order/geometry. Optionally wipe all jobs (evening clear)."""
+    if clear_jobs:
+        Job.objects.all().delete()
+    else:
+        Job.objects.filter(status=Job.Status.PENDING).update(
+            route_order=None,
+            estimated_arrival=None,
+            leg_miles_from_previous=None,
+            leg_minutes_from_previous=None,
         )
+    DayRoute.objects.all().delete()
 
-    # Default start: centroid of jobs if no depot
+
+def get_or_create_day_route() -> DayRoute:
+    route_date = timezone.localdate()
+    obj, _ = DayRoute.objects.get_or_create(job_date=route_date)
+    return obj
+
+
+def resolve_start_point(
+    settings: EngineerSettings,
+    geocoded: Sequence[Job],
+) -> Point:
     if settings.start_lat is None or settings.start_lng is None:
-        start = Point(
+        return Point(
             key='start',
             label='Start (auto)',
             lat=sum(j.lat for j in geocoded) / len(geocoded),
             lng=sum(j.lng for j in geocoded) / len(geocoded),
             appointment='START',
         )
-    else:
-        start = Point(
-            key='start',
-            label=settings.start_display
-            or settings.start_label
-            or settings.start_location,
-            lat=settings.start_lat,
-            lng=settings.start_lng,
-            appointment='START',
-        )
-
-    points: list[Point] = [start]
-    for job in geocoded:
-        points.append(
-            Point(
-                key=f'job-{job.pk}',
-                label=job.reference or job.location,
-                lat=job.lat,
-                lng=job.lng,
-                appointment=job.appointment_type,
-                job_id=job.pk,
-            )
-        )
-
-    road_matrix = fetch_road_matrices(points)
-    matrix = road_matrix.miles
-    if road_matrix.source != 'osrm':
-        warnings.append(
-            'Live road routing unavailable — used approximate distances for ordering.'
-        )
-
-    start_idx = 0
-    index_by_job = {p.job_id: i for i, p in enumerate(points) if p.job_id}
-
-    am_indices = [
-        index_by_job[j.pk]
-        for j in geocoded
-        if j.appointment_type == Job.AppointmentType.AM
-    ]
-    pm_indices = [
-        index_by_job[j.pk]
-        for j in geocoded
-        if j.appointment_type == Job.AppointmentType.PM
-    ]
-    allday_indices = [
-        index_by_job[j.pk]
-        for j in geocoded
-        if j.appointment_type == Job.AppointmentType.ALLDAY
-    ]
-
-    am_order = optimise_cluster(am_indices, matrix, start_idx)
-    pm_start = am_order[-1] if am_order else start_idx
-    pm_order = optimise_cluster(pm_indices, matrix, pm_start)
-
-    final_order = insert_allday_jobs(
-        am_order, pm_order, allday_indices, matrix, start_idx
+    return Point(
+        key='start',
+        label=settings.start_display
+        or settings.start_label
+        or settings.start_location,
+        lat=settings.start_lat,
+        lng=settings.start_lng,
+        appointment='START',
     )
 
-    ordered_points = [points[start_idx]] + [points[i] for i in final_order]
-    road_path = fetch_road_path(ordered_points)
-    if road_path.source != 'osrm':
-        warnings.append(
-            'Could not fetch full road path — map may show straight lines between stops.'
-        )
 
-    clear_current_route(clear_jobs=False)
+def _persist_ordered_jobs(
+    *,
+    start: Point,
+    ordered_jobs: list[Job],
+    road_path,
+    matrix,
+    points: list[Point],
+    index_by_job: dict[int, int],
+    start_idx: int,
+    route_date,
+    order_locked: bool,
+    warnings: list[str],
+) -> RoutePlan:
+    # Clear route fields on pending jobs first
+    Job.objects.filter(status=Job.Status.PENDING).update(
+        route_order=None,
+        estimated_arrival=None,
+        leg_miles_from_previous=None,
+        leg_minutes_from_previous=None,
+    )
 
-    job_by_id = {j.pk: j for j in geocoded}
-    ordered_jobs: list[Job] = []
     miles_legs = road_path.leg_miles
     minutes_legs = road_path.leg_minutes
 
-    for seq, point_idx in enumerate(final_order, start=1):
-        point = points[point_idx]
-        job = job_by_id[point.job_id]
+    for seq, job in enumerate(ordered_jobs, start=1):
         leg_i = seq - 1
-        miles = miles_legs[leg_i] if leg_i < len(miles_legs) else matrix[0][point_idx]
+        point_idx = index_by_job[job.pk]
+        miles = miles_legs[leg_i] if leg_i < len(miles_legs) else matrix[start_idx][point_idx]
         mins = minutes_legs[leg_i] if leg_i < len(minutes_legs) else 0.0
         job.route_order = seq
         job.leg_miles_from_previous = round(miles, 2)
         job.leg_minutes_from_previous = max(0, int(round(mins)))
-        ordered_jobs.append(job)
 
     arrivals = estimate_arrivals(
         minutes_legs[: len(ordered_jobs)],
@@ -532,6 +476,7 @@ def plan_current_route() -> RoutePlan:
             'total_miles': total_miles,
             'total_minutes': total_minutes,
             'source': road_path.source,
+            'order_locked': order_locked,
         },
     )
 
@@ -574,12 +519,6 @@ def plan_current_route() -> RoutePlan:
                 f'AM job "{job.location}" estimated after 1pm — day may be overloaded.'
             )
 
-    ungeocoded = [j for j in jobs if not j.is_geocoded]
-    if ungeocoded:
-        warnings.append(
-            f'{len(ungeocoded)} job(s) skipped because they could not be located.'
-        )
-
     return RoutePlan(
         stops=stops,
         total_miles=total_miles,
@@ -589,6 +528,283 @@ def plan_current_route() -> RoutePlan:
         geometry=road_path.geometry,
         source=road_path.source,
     )
+
+
+def plan_current_route(*, unlock: bool = True) -> RoutePlan:
+    """Optimise pending jobs (AM/PM/all-day). Ignores done/skipped."""
+    settings = EngineerSettings.get_solo()
+    warnings: list[str] = []
+    route_date = timezone.localdate()
+
+    start_warning = ensure_start_geocoded(settings)
+    if start_warning:
+        warnings.append(start_warning)
+
+    all_jobs = list(Job.objects.all())
+    warnings.extend(ensure_geocoded(all_jobs))
+
+    pending = [
+        j
+        for j in all_jobs
+        if j.is_geocoded and j.status == Job.Status.PENDING
+    ]
+    if not pending:
+        DayRoute.objects.filter(job_date=route_date).delete()
+        Job.objects.filter(status=Job.Status.PENDING).update(
+            route_order=None,
+            estimated_arrival=None,
+            leg_miles_from_previous=None,
+            leg_minutes_from_previous=None,
+        )
+        return RoutePlan(
+            stops=[],
+            total_miles=0.0,
+            total_minutes=0,
+            job_count=0,
+            warnings=warnings or ['No pending jobs to plan.'],
+            geometry=[],
+            source='',
+        )
+
+    day_route = DayRoute.objects.filter(job_date=route_date).first()
+    order_locked = bool(day_route and day_route.order_locked and not unlock)
+
+    start = resolve_start_point(settings, pending)
+    # If some jobs are done, start routing remaining from last completed stop
+    last_done = (
+        Job.objects.filter(status=Job.Status.DONE, lat__isnull=False)
+        .order_by('-route_order', '-id')
+        .first()
+    )
+    if last_done and last_done.is_geocoded:
+        start = Point(
+            key='start',
+            label=last_done.geocode_display or last_done.location,
+            lat=last_done.lat,
+            lng=last_done.lng,
+            appointment='START',
+        )
+
+    points: list[Point] = [start]
+    for job in pending:
+        points.append(
+            Point(
+                key=f'job-{job.pk}',
+                label=job.reference or job.location,
+                lat=job.lat,
+                lng=job.lng,
+                appointment=job.appointment_type,
+                job_id=job.pk,
+            )
+        )
+
+    road_matrix = fetch_road_matrices(points)
+    matrix = road_matrix.miles
+    if road_matrix.source == 'haversine':
+        warnings.append(
+            'Live road routing unavailable — used approximate distances for ordering.'
+        )
+    elif road_matrix.source == 'google':
+        warnings.append('Using Google Maps traffic-aware drive times.')
+    elif road_matrix.source == 'ors':
+        warnings.append('Using OpenRouteService drive times.')
+
+    start_idx = 0
+    index_by_job = {p.job_id: i for i, p in enumerate(points) if p.job_id}
+
+    if order_locked:
+        ordered_pending = sorted(
+            pending,
+            key=lambda j: (j.route_order is None, j.route_order or 0, j.id),
+        )
+        final_order = [index_by_job[j.pk] for j in ordered_pending]
+    else:
+        am_indices = [
+            index_by_job[j.pk]
+            for j in pending
+            if j.appointment_type == Job.AppointmentType.AM
+        ]
+        pm_indices = [
+            index_by_job[j.pk]
+            for j in pending
+            if j.appointment_type == Job.AppointmentType.PM
+        ]
+        allday_indices = [
+            index_by_job[j.pk]
+            for j in pending
+            if j.appointment_type == Job.AppointmentType.ALLDAY
+        ]
+        am_order = optimise_cluster(am_indices, matrix, start_idx)
+        pm_start = am_order[-1] if am_order else start_idx
+        pm_order = optimise_cluster(pm_indices, matrix, pm_start)
+        final_order = insert_allday_jobs(
+            am_order, pm_order, allday_indices, matrix, start_idx
+        )
+
+    ordered_points = [points[start_idx]] + [points[i] for i in final_order]
+    road_path = fetch_road_path(ordered_points)
+    if road_path.source == 'haversine':
+        warnings.append(
+            'Could not fetch full road path — map may show straight lines between stops.'
+        )
+
+    job_by_id = {j.pk: j for j in pending}
+    ordered_jobs = [job_by_id[points[i].job_id] for i in final_order]
+
+    ungeocoded = [j for j in all_jobs if not j.is_geocoded]
+    if ungeocoded:
+        warnings.append(
+            f'{len(ungeocoded)} job(s) skipped because they could not be located.'
+        )
+
+    return _persist_ordered_jobs(
+        start=start,
+        ordered_jobs=ordered_jobs,
+        road_path=road_path,
+        matrix=matrix,
+        points=points,
+        index_by_job=index_by_job,
+        start_idx=start_idx,
+        route_date=route_date,
+        order_locked=order_locked,
+        warnings=warnings,
+    )
+
+
+def apply_manual_order(job_ids: Sequence[int]) -> RoutePlan:
+    """Lock route to the given pending job id order and recompute times/path."""
+    settings = EngineerSettings.get_solo()
+    warnings: list[str] = []
+    route_date = timezone.localdate()
+
+    start_warning = ensure_start_geocoded(settings)
+    if start_warning:
+        warnings.append(start_warning)
+
+    pending_qs = Job.objects.filter(status=Job.Status.PENDING, id__in=job_ids)
+    by_id = {j.id: j for j in pending_qs}
+    ordered_jobs = [by_id[i] for i in job_ids if i in by_id]
+    warnings.extend(ensure_geocoded(ordered_jobs))
+    ordered_jobs = [j for j in ordered_jobs if j.is_geocoded]
+
+    if not ordered_jobs:
+        return plan_current_route(unlock=True)
+
+    # Mark locked before planning path
+    DayRoute.objects.update_or_create(
+        job_date=route_date,
+        defaults={'order_locked': True},
+    )
+
+    start = resolve_start_point(settings, ordered_jobs)
+    last_done = (
+        Job.objects.filter(status=Job.Status.DONE, lat__isnull=False)
+        .order_by('-id')
+        .first()
+    )
+    if last_done and last_done.is_geocoded:
+        start = Point(
+            key='start',
+            label=last_done.geocode_display or last_done.location,
+            lat=last_done.lat,
+            lng=last_done.lng,
+            appointment='START',
+        )
+
+    points = [start] + [
+        Point(
+            key=f'job-{j.pk}',
+            label=j.reference or j.location,
+            lat=j.lat,
+            lng=j.lng,
+            appointment=j.appointment_type,
+            job_id=j.pk,
+        )
+        for j in ordered_jobs
+    ]
+    index_by_job = {p.job_id: i for i, p in enumerate(points) if p.job_id}
+    matrix = fetch_road_matrices(points).miles
+    road_path = fetch_road_path(points)
+    warnings.append('Route order locked to your manual arrangement.')
+
+    return _persist_ordered_jobs(
+        start=start,
+        ordered_jobs=ordered_jobs,
+        road_path=road_path,
+        matrix=matrix,
+        points=points,
+        index_by_job=index_by_job,
+        start_idx=0,
+        route_date=route_date,
+        order_locked=True,
+        warnings=warnings,
+    )
+
+
+def set_job_status(job: Job, status: str, *, replan: bool = True) -> RoutePlan | None:
+    job.status = status
+    if status != Job.Status.PENDING:
+        job.route_order = None
+        job.estimated_arrival = None
+        job.leg_miles_from_previous = None
+        job.leg_minutes_from_previous = None
+    job.save(
+        update_fields=[
+            'status',
+            'route_order',
+            'estimated_arrival',
+            'leg_miles_from_previous',
+            'leg_minutes_from_previous',
+        ]
+    )
+    if not replan:
+        return None
+    day = DayRoute.objects.order_by('-updated_at').first()
+    if day and day.order_locked:
+        remaining_ids = list(
+            Job.objects.filter(status=Job.Status.PENDING).order_by('route_order', 'id')
+            .values_list('id', flat=True)
+        )
+        if remaining_ids:
+            return apply_manual_order(remaining_ids)
+    return plan_current_route(unlock=True)
+
+
+def next_job_navigate_url() -> tuple[Job | None, str]:
+    """One-tap Google Maps directions to the next pending stop only."""
+    settings = EngineerSettings.get_solo()
+    nxt = (
+        Job.objects.filter(status=Job.Status.PENDING, lat__isnull=False)
+        .order_by('route_order', 'id')
+        .first()
+    )
+    if not nxt or not nxt.is_geocoded:
+        return None, ''
+
+    origin_lat = settings.start_lat
+    origin_lng = settings.start_lng
+    last_done = (
+        Job.objects.filter(status=Job.Status.DONE, lat__isnull=False)
+        .order_by('-id')
+        .first()
+    )
+    if last_done and last_done.is_geocoded:
+        origin_lat, origin_lng = last_done.lat, last_done.lng
+
+    if origin_lat is None or origin_lng is None:
+        # No start — open maps to the destination only
+        url = (
+            'https://www.google.com/maps/dir/?api=1'
+            f'&destination={nxt.lat},{nxt.lng}&travelmode=driving'
+        )
+        return nxt, url
+
+    url = (
+        'https://www.google.com/maps/dir/?api=1'
+        f'&origin={origin_lat},{origin_lng}'
+        f'&destination={nxt.lat},{nxt.lng}&travelmode=driving'
+    )
+    return nxt, url
 
 
 def google_maps_url(stops: Sequence[PlannedStop]) -> str:

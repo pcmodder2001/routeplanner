@@ -19,6 +19,9 @@ services:
       SITEMATRIX_FAIL_OPEN: "${SITEMATRIX_FAIL_OPEN:-1}"
       SITEMATRIX_SITE_NAME: "${SITEMATRIX_SITE_NAME:-Route Planner}"
       SITEMATRIX_TIMEOUT: "${SITEMATRIX_TIMEOUT:-3}"
+      # Optional: traffic-aware times (Google) or ORS road times
+      GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY:-}"
+      OPENROUTESERVICE_API_KEY: "${OPENROUTESERVICE_API_KEY:-}"
     volumes:
       - routeplanner_data:/data
     restart: unless-stopped

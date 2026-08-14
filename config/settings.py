@@ -159,3 +159,7 @@ try:
     SITEMATRIX_TIMEOUT = int(os.environ.get('SITEMATRIX_TIMEOUT', '3') or '3')
 except ValueError:
     SITEMATRIX_TIMEOUT = 3
+
+# Optional traffic / road routing keys (Google preferred for live traffic)
+GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
+OPENROUTESERVICE_API_KEY = os.environ.get('OPENROUTESERVICE_API_KEY', '')

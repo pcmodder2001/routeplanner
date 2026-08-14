@@ -64,7 +64,8 @@ python manage.py runserver 0.0.0.0:8000
 
 - UK postcodes via [postcodes.io](https://postcodes.io/) (free)
 - Street names via OpenStreetMap Nominatim reverse geocode
-- Driving routes via public OSRM
+- Drive times: Google traffic if `GOOGLE_MAPS_API_KEY`, else OpenRouteService if `OPENROUTESERVICE_API_KEY`, else public OSRM
+- Drag to lock manual order; Done/Skip re-routes remaining stops; Navigate = next stop only
 - Assumed ~45 minutes on site between jobs for ETA — adjust `STOP_MINUTES` in `planner/routing.py`
 
 ## Admin

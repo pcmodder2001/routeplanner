@@ -44,6 +44,11 @@ class Job(models.Model):
         PM = 'PM', 'PM (1pm – 6pm)'
         ALLDAY = 'ALLDAY', 'All day'
 
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        DONE = 'done', 'Done'
+        SKIPPED = 'skipped', 'Skipped'
+
     job_date = models.DateField(default=timezone.localdate)
     reference = models.CharField(
         max_length=100,
@@ -58,6 +63,11 @@ class Job(models.Model):
         max_length=10,
         choices=AppointmentType.choices,
         default=AppointmentType.ALLDAY,
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=Status.choices,
+        default=Status.PENDING,
     )
     notes = models.TextField(blank=True)
     lat = models.FloatField(null=True, blank=True)
@@ -85,6 +95,10 @@ class Job(models.Model):
         return self.lat is not None and self.lng is not None
 
     @property
+    def is_active(self):
+        return self.status == self.Status.PENDING
+
+    @property
     def appointment_short(self):
         return {
             self.AppointmentType.AM: 'AM',
@@ -104,6 +118,10 @@ class DayRoute(models.Model):
     total_miles = models.FloatField(default=0)
     total_minutes = models.PositiveIntegerField(default=0)
     source = models.CharField(max_length=20, blank=True, default='osrm')
+    order_locked = models.BooleanField(
+        default=False,
+        help_text='When true, keep manual drag order instead of auto-optimising',
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
