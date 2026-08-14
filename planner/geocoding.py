@@ -616,25 +616,36 @@ def address_autocomplete(query: str, *, session_token: str = '') -> list[dict[st
 
 
 def google_places_autocomplete(query: str, *, session_token: str = '') -> list[dict[str, str]]:
-    """Return place suggestions for UK addresses/postcodes."""
+    """Return Maps-style suggestions: addresses, postcodes, and businesses."""
     key = google_maps_key()
     if not key or len(query.strip()) < 3:
         return []
 
-    search = query.strip()
-    postcode, number = parse_postcode_and_number(search)
-    # Rewrite "WF169PF 22" into something Google Places resolves better
-    if postcode and number:
+    raw = query.strip()
+    postcode, number = parse_postcode_and_number(raw)
+    search = raw
+
+    # Pure "WF16 9PF 22" → format Places prefers for premises
+    if postcode and number and _is_postcode_only_query(raw):
         search = f'{number}, {postcode}'
 
-    params = {
+    params: dict[str, str] = {
         'input': search,
         'components': 'country:gb',
-        'types': 'geocode',
         'key': key,
+        # No `types` filter — same mix as Google Maps (addresses + businesses)
     }
     if session_token:
         params['sessiontoken'] = session_token
+
+    # Bias toward the postcode area when the query includes one ("WF12 8AJ Esso")
+    if postcode:
+        bias = google_geocode(postcode) if google_maps_key() else None
+        if not bias:
+            bias = geocode_postcode(postcode)
+        if bias and bias.get('lat') is not None and bias.get('lng') is not None:
+            params['location'] = f"{bias['lat']},{bias['lng']}"
+            params['radius'] = '8000'
 
     try:
         response = requests.get(
@@ -649,7 +660,11 @@ def google_places_autocomplete(query: str, *, session_token: str = '') -> list[d
         return []
 
     if data.get('status') not in ('OK', 'ZERO_RESULTS'):
-        logger.info('Places Autocomplete status=%s', data.get('status'))
+        logger.info(
+            'Places Autocomplete status=%s error=%s',
+            data.get('status'),
+            data.get('error_message'),
+        )
         return []
 
     suggestions: list[dict[str, str]] = []
@@ -665,13 +680,11 @@ def google_places_autocomplete(query: str, *, session_token: str = '') -> list[d
             }
         )
 
-    # Places often returns only the postcode for "22, WF16 9PF" — prefer a resolved
-    # full address when we know the door number.
-    if postcode and number:
+    # Pure postcode + door number: prefer resolved street address at the top
+    if postcode and number and _is_postcode_only_query(raw):
         resolved = geocode_postcode_with_number(postcode, number)
         if resolved:
             resolved_item = _suggestion_from_resolved(resolved)
-            # Drop vague postcode-only predictions that omit the house number
             filtered = [
                 s
                 for s in suggestions
@@ -690,7 +703,7 @@ def google_place_details(place_id: str, *, session_token: str = '') -> dict[str,
 
     params = {
         'place_id': place_id,
-        'fields': 'geometry,formatted_address,address_component,name',
+        'fields': 'geometry,formatted_address,address_component,name,types',
         'key': key,
     }
     if session_token:
@@ -717,8 +730,15 @@ def google_place_details(place_id: str, *, session_token: str = '') -> dict[str,
         return None
 
     parts = _parse_google_address_components(result.get('address_components') or [])
-    formatted = result.get('formatted_address') or result.get('name') or ''
-    display = formatted.replace(', UK', '').replace(', United Kingdom', '')
+    name = (result.get('name') or '').strip()
+    formatted = (result.get('formatted_address') or '').replace(', UK', '').replace(
+        ', United Kingdom', ''
+    ).strip()
+    # Businesses: "Esso, High Street, Dewsbury"
+    if name and formatted and name.lower() not in formatted.lower():
+        display = f'{name}, {formatted}'
+    else:
+        display = formatted or name
 
     return {
         'lat': float(loc['lat']),
@@ -727,6 +747,7 @@ def google_place_details(place_id: str, *, session_token: str = '') -> dict[str,
         'road': parts.get('road', ''),
         'place': parts.get('place') or parts.get('district') or '',
         'postcode': parts.get('postcode') or '',
+        'name': name,
         'source': 'google-places',
     }
 
