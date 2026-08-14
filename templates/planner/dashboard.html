@@ -52,10 +52,8 @@
       {{ job_form.reference }}
       {{ job_form.notes }}
       <button type="submit" class="btn btn-primary">Add job</button>
-      {% if getaddress_enabled %}
-      <p class="meta">Enter a postcode (e.g. <code>WF16 9PF</code>) and pick the address from the list. Door number filters the list.</p>
-      {% elif google_places_enabled %}
-      <p class="meta">Try <code>WF16 9PF 22</code> — door number resolves to the street. For a full pick-list of every address at a postcode, add an <a href="https://ideal-postcodes.co.uk/" target="_blank" rel="noopener">Ideal Postcodes</a> key as <code>IDEAL_POSTCODES_API_KEY</code>.</p>
+      {% if google_places_enabled %}
+      <p class="meta">Type postcode + door number, e.g. <code>WF16 9PF 22</code> — it fills the street for free. Or type a street name.</p>
       {% endif %}
     </form>
 
