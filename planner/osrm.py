@@ -153,6 +153,49 @@ def _google_matrices(points: Sequence[HasLatLng], key: str) -> RoadMatrices | No
     return RoadMatrices(miles=miles, minutes=minutes, source="google")
 
 
+def _decode_polyline(encoded: str) -> list[list[float]]:
+    """Decode a Google encoded polyline into [[lat, lng], ...]."""
+    if not encoded:
+        return []
+    coords: list[list[float]] = []
+    index = 0
+    lat = 0
+    lng = 0
+    length = len(encoded)
+
+    while index < length:
+        result = 0
+        shift = 0
+        while True:
+            if index >= length:
+                return coords
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1F) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlat = ~(result >> 1) if result & 1 else (result >> 1)
+        lat += dlat
+
+        result = 0
+        shift = 0
+        while True:
+            if index >= length:
+                return coords
+            b = ord(encoded[index]) - 63
+            index += 1
+            result |= (b & 0x1F) << shift
+            shift += 5
+            if b < 0x20:
+                break
+        dlng = ~(result >> 1) if result & 1 else (result >> 1)
+        lng += dlng
+        coords.append([lat / 1e5, lng / 1e5])
+
+    return coords
+
+
 def _google_path(points: Sequence[HasLatLng], key: str) -> RoadPath | None:
     if len(points) < 2:
         return RoadPath(
@@ -203,13 +246,27 @@ def _google_path(points: Sequence[HasLatLng], key: str) -> RoadPath | None:
         dur = leg.get("duration_in_traffic") or leg.get("duration") or {}
         leg_miles.append(dist / METERS_PER_MILE)
         leg_minutes.append((dur.get("value") or 0) / 60.0)
+        # Prefer per-step polylines so the map follows the road network
         for step in leg.get("steps") or []:
+            step_poly = ((step.get("polyline") or {}).get("points")) or ""
+            decoded = _decode_polyline(step_poly)
+            if decoded:
+                if geometry and decoded and geometry[-1] == decoded[0]:
+                    geometry.extend(decoded[1:])
+                else:
+                    geometry.extend(decoded)
+                continue
             start = step.get("start_location") or {}
             end = step.get("end_location") or {}
             if start.get("lat") is not None:
                 geometry.append([start["lat"], start["lng"]])
             if end.get("lat") is not None:
                 geometry.append([end["lat"], end["lng"]])
+
+    # Fallback: whole-route overview polyline
+    if len(geometry) < 3:
+        overview = ((route.get("overview_polyline") or {}).get("points")) or ""
+        geometry = _decode_polyline(overview)
 
     if not geometry:
         geometry = [[p.lat, p.lng] for p in points]
