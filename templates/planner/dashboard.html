@@ -39,13 +39,22 @@
 <div class="layout">
   <aside class="panel">
     <h2>Add job</h2>
-    <form method="post" action="{% url 'add_job' %}" class="stack">
+    <form method="post" action="{% url 'add_job' %}" class="stack" id="add-job-form" autocomplete="off">
       {% csrf_token %}
-      {{ job_form.location }}
+      <div class="suggest-wrap">
+        {{ job_form.location }}
+        <div id="place-suggestions" class="suggest-list" hidden></div>
+      </div>
+      <input type="hidden" name="place_lat" id="place_lat" value="">
+      <input type="hidden" name="place_lng" id="place_lng" value="">
+      <input type="hidden" name="place_display" id="place_display" value="">
       {{ job_form.appointment_type }}
       {{ job_form.reference }}
       {{ job_form.notes }}
       <button type="submit" class="btn btn-primary">Add job</button>
+      {% if google_places_enabled %}
+      <p class="meta">Type an address or postcode — Google suggestions will appear.</p>
+      {% endif %}
     </form>
 
     <div class="actions-row">
@@ -196,6 +205,90 @@
 {{ route_geometry|json_script:"route-geometry" }}
 <script>
 (function () {
+  // --- Google Places address autocomplete ---
+  const locationInput = document.getElementById('id_location');
+  const suggestBox = document.getElementById('place-suggestions');
+  const placeLat = document.getElementById('place_lat');
+  const placeLng = document.getElementById('place_lng');
+  const placeDisplay = document.getElementById('place_display');
+  const placesEnabled = {{ google_places_enabled|yesno:"true,false" }};
+  let suggestTimer = null;
+  let sessionToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+  function clearPlacePick() {
+    if (placeLat) placeLat.value = '';
+    if (placeLng) placeLng.value = '';
+    if (placeDisplay) placeDisplay.value = '';
+  }
+
+  function hideSuggestions() {
+    if (!suggestBox) return;
+    suggestBox.hidden = true;
+    suggestBox.innerHTML = '';
+  }
+
+  function pickSuggestion(item) {
+    if (!locationInput) return;
+    fetch('/places/details/?place_id=' + encodeURIComponent(item.place_id) +
+          '&token=' + encodeURIComponent(sessionToken))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok || !data.place) return;
+        const p = data.place;
+        locationInput.value = p.display || item.description;
+        if (placeLat) placeLat.value = p.lat;
+        if (placeLng) placeLng.value = p.lng;
+        if (placeDisplay) placeDisplay.value = p.display || item.description;
+        hideSuggestions();
+        sessionToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      })
+      .catch(function () {});
+  }
+
+  function showSuggestions(items) {
+    if (!suggestBox) return;
+    if (!items.length) {
+      hideSuggestions();
+      return;
+    }
+    suggestBox.innerHTML = '';
+    items.forEach(function (item) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'suggest-item';
+      btn.innerHTML = '<strong>' + (item.main_text || item.description) + '</strong>' +
+        (item.secondary_text ? '<span>' + item.secondary_text + '</span>' : '');
+      btn.addEventListener('click', function () { pickSuggestion(item); });
+      suggestBox.appendChild(btn);
+    });
+    suggestBox.hidden = false;
+  }
+
+  if (placesEnabled && locationInput && suggestBox) {
+    locationInput.addEventListener('input', function () {
+      clearPlacePick();
+      const q = locationInput.value.trim();
+      clearTimeout(suggestTimer);
+      if (q.length < 3) {
+        hideSuggestions();
+        return;
+      }
+      suggestTimer = setTimeout(function () {
+        fetch('/places/autocomplete/?q=' + encodeURIComponent(q) +
+              '&token=' + encodeURIComponent(sessionToken))
+          .then(function (r) { return r.json(); })
+          .then(function (data) { showSuggestions(data.suggestions || []); })
+          .catch(function () { hideSuggestions(); });
+      }, 220);
+    });
+    document.addEventListener('click', function (e) {
+      if (!suggestBox.contains(e.target) && e.target !== locationInput) {
+        hideSuggestions();
+      }
+    });
+  }
+
+  // --- Map ---
   const points = JSON.parse(document.getElementById('map-data').textContent);
   const geometry = JSON.parse(document.getElementById('route-geometry').textContent);
   const mapEl = document.getElementById('map');

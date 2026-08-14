@@ -1,12 +1,16 @@
-"""UK-friendly geocoding via postcodes.io and Nominatim."""
+"""UK-friendly geocoding: Google (preferred) → postcodes.io → Nominatim."""
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 import time
 from typing import Any
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 # Matches spaced or compact UK postcodes, e.g. HD9 1UY / hd91uy / SW1A1AA
 UK_POSTCODE_RE = re.compile(
@@ -20,6 +24,10 @@ UK_POSTCODE_FIND_RE = re.compile(
 
 USER_AGENT = 'OpenreachRoutePlanner/1.0 (local engineer tool)'
 _last_nominatim_call = 0.0
+
+
+def google_maps_key() -> str:
+    return (os.environ.get('GOOGLE_MAPS_API_KEY') or '').strip()
 
 
 def extract_postcode(text: str) -> str | None:
@@ -49,8 +57,230 @@ def _throttle_nominatim() -> None:
     _last_nominatim_call = time.monotonic()
 
 
+def format_postcode_display(
+    postcode: str,
+    *,
+    road: str = '',
+    place: str = '',
+    fallback_place: str = '',
+) -> str:
+    normalised = normalise_postcode(postcode)
+    place = place or fallback_place
+    if road and place:
+        return f'{road}, {place} · {normalised}'
+    if road:
+        return f'{road} · {normalised}'
+    if place:
+        return f'{place} · {normalised}'
+    return normalised
+
+
+def _parse_google_address_components(components: list[dict]) -> dict[str, str]:
+    mapped: dict[str, str] = {}
+    for comp in components:
+        types = comp.get('types') or []
+        name = comp.get('long_name') or ''
+        if 'route' in types:
+            mapped['road'] = name
+        elif 'postal_town' in types or 'locality' in types:
+            mapped.setdefault('place', name)
+        elif 'sublocality' in types or 'sublocality_level_1' in types:
+            mapped.setdefault('place', name)
+        elif 'administrative_area_level_2' in types:
+            mapped.setdefault('district', name)
+        elif 'postal_code' in types:
+            mapped['postcode'] = name
+    return mapped
+
+
+def google_geocode(query: str) -> dict[str, Any] | None:
+    key = google_maps_key()
+    if not key:
+        return None
+    try:
+        response = requests.get(
+            'https://maps.googleapis.com/maps/api/geocode/json',
+            params={
+                'address': query,
+                'components': 'country:GB',
+                'region': 'uk',
+                'key': key,
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException:
+        logger.exception('Google Geocoding failed')
+        return None
+
+    if data.get('status') != 'OK' or not data.get('results'):
+        logger.info('Google Geocoding status=%s for %r', data.get('status'), query)
+        return None
+
+    hit = data['results'][0]
+    loc = (hit.get('geometry') or {}).get('location') or {}
+    if loc.get('lat') is None or loc.get('lng') is None:
+        return None
+
+    parts = _parse_google_address_components(hit.get('address_components') or [])
+    formatted = hit.get('formatted_address') or query
+    road = parts.get('road', '')
+    place = parts.get('place') or parts.get('district') or ''
+    postcode = parts.get('postcode') or extract_postcode(formatted) or ''
+
+    if looks_like_postcode(query) and (road or place):
+        display = format_postcode_display(
+            postcode or query,
+            road=road,
+            place=place,
+        )
+    else:
+        display = formatted.replace(', UK', '').replace(', United Kingdom', '')
+
+    return {
+        'lat': float(loc['lat']),
+        'lng': float(loc['lng']),
+        'display': display[:255],
+        'road': road,
+        'place': place,
+        'postcode': postcode,
+        'source': 'google',
+    }
+
+
+def google_reverse(lat: float, lng: float) -> dict[str, str] | None:
+    key = google_maps_key()
+    if not key:
+        return None
+    try:
+        response = requests.get(
+            'https://maps.googleapis.com/maps/api/geocode/json',
+            params={
+                'latlng': f'{lat},{lng}',
+                'result_type': 'street_address|route',
+                'key': key,
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException:
+        logger.exception('Google reverse geocode failed')
+        return None
+
+    if data.get('status') != 'OK' or not data.get('results'):
+        return None
+
+    hit = data['results'][0]
+    parts = _parse_google_address_components(hit.get('address_components') or [])
+    road = parts.get('road', '')
+    place = parts.get('place') or parts.get('district') or ''
+    if not road and not place:
+        return None
+    return {'road': road, 'place': place}
+
+
+def google_places_autocomplete(query: str, *, session_token: str = '') -> list[dict[str, str]]:
+    """Return place suggestions for UK addresses/postcodes."""
+    key = google_maps_key()
+    if not key or len(query.strip()) < 3:
+        return []
+
+    params = {
+        'input': query.strip(),
+        'components': 'country:gb',
+        'types': 'geocode',
+        'key': key,
+    }
+    if session_token:
+        params['sessiontoken'] = session_token
+
+    try:
+        response = requests.get(
+            'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+            params=params,
+            timeout=12,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException:
+        logger.exception('Google Places Autocomplete failed')
+        return []
+
+    if data.get('status') not in ('OK', 'ZERO_RESULTS'):
+        logger.info('Places Autocomplete status=%s', data.get('status'))
+        return []
+
+    suggestions = []
+    for pred in data.get('predictions') or []:
+        suggestions.append(
+            {
+                'place_id': pred.get('place_id') or '',
+                'description': pred.get('description') or '',
+                'main_text': ((pred.get('structured_formatting') or {}).get('main_text') or ''),
+                'secondary_text': (
+                    (pred.get('structured_formatting') or {}).get('secondary_text') or ''
+                ),
+            }
+        )
+    return suggestions
+
+
+def google_place_details(place_id: str, *, session_token: str = '') -> dict[str, Any] | None:
+    key = google_maps_key()
+    if not key or not place_id:
+        return None
+
+    params = {
+        'place_id': place_id,
+        'fields': 'geometry,formatted_address,address_component,name',
+        'key': key,
+    }
+    if session_token:
+        params['sessiontoken'] = session_token
+
+    try:
+        response = requests.get(
+            'https://maps.googleapis.com/maps/api/place/details/json',
+            params=params,
+            timeout=15,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException:
+        logger.exception('Google Place Details failed')
+        return None
+
+    if data.get('status') != 'OK' or not data.get('result'):
+        return None
+
+    result = data['result']
+    loc = ((result.get('geometry') or {}).get('location')) or {}
+    if loc.get('lat') is None or loc.get('lng') is None:
+        return None
+
+    parts = _parse_google_address_components(result.get('address_components') or [])
+    formatted = result.get('formatted_address') or result.get('name') or ''
+    display = formatted.replace(', UK', '').replace(', United Kingdom', '')
+
+    return {
+        'lat': float(loc['lat']),
+        'lng': float(loc['lng']),
+        'display': display[:255],
+        'road': parts.get('road', ''),
+        'place': parts.get('place') or parts.get('district') or '',
+        'postcode': parts.get('postcode') or '',
+        'source': 'google-places',
+    }
+
+
 def reverse_street_name(lat: float, lng: float) -> dict[str, str] | None:
-    """Nearest road / place label from OpenStreetMap (free)."""
+    """Nearest road / place label — Google first, then Nominatim."""
+    google = google_reverse(lat, lng)
+    if google:
+        return google
+
     _throttle_nominatim()
     try:
         response = requests.get(
@@ -92,25 +322,12 @@ def reverse_street_name(lat: float, lng: float) -> dict[str, str] | None:
     return {'road': road, 'place': place}
 
 
-def format_postcode_display(
-    postcode: str,
-    *,
-    road: str = '',
-    place: str = '',
-    fallback_place: str = '',
-) -> str:
-    normalised = normalise_postcode(postcode)
-    place = place or fallback_place
-    if road and place:
-        return f'{road}, {place} · {normalised}'
-    if road:
-        return f'{road} · {normalised}'
-    if place:
-        return f'{place} · {normalised}'
-    return normalised
-
-
 def geocode_postcode(postcode: str) -> dict[str, Any] | None:
+    # Prefer Google when available (better street label for many UK postcodes)
+    google = google_geocode(postcode)
+    if google:
+        return google
+
     normalised = normalise_postcode(postcode)
     url = f'https://api.postcodes.io/postcodes/{requests.utils.quote(normalised)}'
     try:
@@ -132,7 +349,6 @@ def geocode_postcode(postcode: str) -> dict[str, Any] | None:
         or result.get('admin_district')
         or ''
     )
-    # Prefer a real settlement name over "unparished area"
     if 'unparished' in fallback_place.lower():
         fallback_place = result.get('admin_ward') or result.get('admin_district') or ''
 
@@ -204,8 +420,12 @@ def geocode_location(location: str) -> dict[str, Any] | None:
     if not text:
         return None
 
-    # Always prefer postcodes.io for postcode-shaped input (spaced or not).
-    # Never use Nominatim search for bare postcodes — it can latch onto POIs.
+    # Google first when keyed — handles addresses and postcodes well
+    if google_maps_key():
+        result = google_geocode(text)
+        if result:
+            return result
+
     if looks_like_postcode(text):
         return geocode_postcode(text)
 
@@ -213,7 +433,6 @@ def geocode_location(location: str) -> dict[str, Any] | None:
     if postcode and looks_like_postcode(postcode):
         result = geocode_postcode(postcode)
         if result:
-            # Keep typed address text if user entered more than the postcode
             if len(re.sub(r'\s+', '', text)) > len(re.sub(r'\s+', '', postcode)) + 2:
                 result = {
                     **result,

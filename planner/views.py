@@ -1,10 +1,15 @@
 from django.contrib import messages
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .forms import AppointmentTypeForm, JobForm, JobNotesForm, SettingsForm
-from .geocoding import geocode_location
+from .geocoding import (
+    geocode_location,
+    google_maps_key,
+    google_place_details,
+    google_places_autocomplete,
+)
 from .models import DayRoute, EngineerSettings, Job
 from .osrm import active_routing_label
 from .routing import (
@@ -153,8 +158,31 @@ def dashboard(request):
         'route_source': source,
         'route_source_label': source_label,
         'routing_provider': active_routing_label(),
+        'google_places_enabled': bool(google_maps_key()),
     }
     return render(request, 'planner/dashboard.html', context)
+
+
+@require_GET
+def places_autocomplete(request):
+    query = (request.GET.get('q') or '').strip()
+    token = (request.GET.get('token') or '').strip()
+    if not google_maps_key():
+        return JsonResponse({'suggestions': [], 'enabled': False})
+    suggestions = google_places_autocomplete(query, session_token=token)
+    return JsonResponse({'suggestions': suggestions, 'enabled': True})
+
+
+@require_GET
+def place_details(request):
+    place_id = (request.GET.get('place_id') or '').strip()
+    token = (request.GET.get('token') or '').strip()
+    if not place_id:
+        return JsonResponse({'ok': False, 'error': 'missing place_id'}, status=400)
+    details = google_place_details(place_id, session_token=token)
+    if not details:
+        return JsonResponse({'ok': False, 'error': 'not found'}, status=404)
+    return JsonResponse({'ok': True, 'place': details})
 
 
 @require_POST
@@ -162,18 +190,34 @@ def add_job(request):
     form = JobForm(request.POST)
     if form.is_valid():
         job = form.save(commit=False)
-        result = geocode_location(job.location)
-        if result:
-            job.lat = result['lat']
-            job.lng = result['lng']
-            job.geocode_display = result['display'][:255]
-            messages.success(request, f'Added {result["display"]}')
-        else:
-            messages.warning(
-                request,
-                f'Added {job.location}, but could not geocode it yet. '
-                'Check the address/postcode.',
-            )
+
+        # Prefer coords from Google Places pick when present
+        place_lat = request.POST.get('place_lat', '').strip()
+        place_lng = request.POST.get('place_lng', '').strip()
+        place_display = request.POST.get('place_display', '').strip()
+        if place_lat and place_lng:
+            try:
+                job.lat = float(place_lat)
+                job.lng = float(place_lng)
+                job.geocode_display = (place_display or job.location)[:255]
+                messages.success(request, f'Added {job.geocode_display}')
+            except ValueError:
+                place_lat = place_lng = ''
+
+        if not place_lat or not place_lng:
+            result = geocode_location(job.location)
+            if result:
+                job.lat = result['lat']
+                job.lng = result['lng']
+                job.geocode_display = result['display'][:255]
+                messages.success(request, f'Added {result["display"]}')
+            else:
+                messages.warning(
+                    request,
+                    f'Added {job.location}, but could not geocode it yet. '
+                    'Check the address/postcode.',
+                )
+
         job.status = Job.Status.PENDING
         job.route_order = None
         job.save()

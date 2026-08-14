@@ -426,6 +426,44 @@ a { color: var(--primary); }
 
 .hidden { display: none; }
 
+.suggest-wrap {
+  position: relative;
+}
+
+.suggest-list {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.suggest-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+  border-bottom: 1px solid #eef2ec;
+}
+
+.suggest-item:last-child { border-bottom: none; }
+.suggest-item:hover { background: #eef5ef; }
+.suggest-item strong { font-size: 0.92rem; color: var(--ink); }
+.suggest-item span { font-size: 0.8rem; color: var(--muted); }
+
 .warn { color: var(--danger); font-weight: 600; }
 
 .btn-icon {
