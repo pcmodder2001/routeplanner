@@ -94,6 +94,70 @@ a { color: var(--primary); }
 
 .nav a:hover { color: var(--ink); }
 
+.nav-user {
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.nav-logout {
+  display: inline;
+  margin: 0;
+}
+
+.btn-link {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-link:hover { color: var(--ink); }
+
+.auth-page .page {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 5rem);
+}
+
+.auth-card {
+  width: min(100%, 26rem);
+}
+
+.auth-card h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.6rem;
+}
+
+.auth-card .lede {
+  margin-bottom: 1.25rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.remember {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.checkbox {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
 .page {
   max-width: 1180px;
   margin: 0 auto;

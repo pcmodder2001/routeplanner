@@ -1,9 +1,11 @@
 from django.contrib import messages
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from .forms import AppointmentTypeForm, JobForm, JobNotesForm, SettingsForm
+from .forms import AppointmentTypeForm, JobForm, JobNotesForm, LoginForm, SettingsForm
 from .geocoding import (
     address_autocomplete,
     address_lookup_enabled,
@@ -25,15 +27,66 @@ from .routing import (
     set_job_status,
 )
 
+REMEMBER_ME_SECONDS = 60 * 60 * 24 * 90  # 90 days
 
+
+def _user_job(request, pk: int) -> Job:
+    return get_object_or_404(Job, pk=pk, user=request.user)
+
+
+@require_http_methods(['GET', 'POST'])
+def login_view(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
+    form = LoginForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        user = authenticate(
+            request,
+            username=form.cleaned_data['username'],
+            password=form.cleaned_data['password'],
+        )
+        if user is None:
+            messages.error(request, 'Invalid username or password.')
+        elif not user.is_active:
+            messages.error(request, 'This account is disabled.')
+        else:
+            login(request, user)
+            if form.cleaned_data.get('remember_me'):
+                request.session.set_expiry(REMEMBER_ME_SECONDS)
+            else:
+                request.session.set_expiry(0)  # until browser closes
+            EngineerSettings.for_user(user)
+            next_url = request.GET.get('next') or request.POST.get('next') or '/'
+            if not next_url.startswith('/'):
+                next_url = '/'
+            return redirect(next_url)
+
+    return render(
+        request,
+        'planner/login.html',
+        {
+            'form': form,
+            'next': request.GET.get('next', ''),
+        },
+    )
+
+
+@require_POST
+def logout_view(request):
+    logout(request)
+    messages.info(request, 'Signed out.')
+    return redirect('login')
+
+
+@login_required
 def dashboard(request):
-    jobs = Job.objects.all().order_by(
+    jobs = Job.objects.filter(user=request.user).order_by(
         'status',
         'route_order',
         'appointment_type',
         'id',
     )
-    # Pending with order first, then unordered pending, then done/skipped
     pending = [j for j in jobs if j.status == Job.Status.PENDING]
     pending_ordered = sorted(
         [j for j in pending if j.route_order is not None],
@@ -43,9 +96,11 @@ def dashboard(request):
     finished = [j for j in jobs if j.status != Job.Status.PENDING]
     display_jobs = pending_ordered + pending_rest + finished
 
-    settings = EngineerSettings.get_solo()
+    settings = EngineerSettings.for_user(request.user)
     planned = pending_ordered
-    day_route = DayRoute.objects.order_by('-updated_at').first()
+    day_route = (
+        DayRoute.objects.filter(user=request.user).order_by('-updated_at').first()
+    )
     total_miles = (
         day_route.total_miles
         if day_route
@@ -118,7 +173,7 @@ def dashboard(request):
             )
 
     route_geometry = day_route.geometry if day_route else []
-    next_job, next_nav_url = next_job_navigate_url()
+    next_job, next_nav_url = next_job_navigate_url(request.user)
     job_rows = [
         {
             'job': job,
@@ -168,6 +223,7 @@ def dashboard(request):
     return render(request, 'planner/dashboard.html', context)
 
 
+@login_required
 @require_GET
 def places_autocomplete(request):
     query = (request.GET.get('q') or '').strip()
@@ -184,6 +240,7 @@ def places_autocomplete(request):
     )
 
 
+@login_required
 @require_GET
 def place_details(request):
     place_id = (request.GET.get('place_id') or '').strip()
@@ -196,13 +253,14 @@ def place_details(request):
     return JsonResponse({'ok': True, 'place': details})
 
 
+@login_required
 @require_POST
 def add_job(request):
     form = JobForm(request.POST)
     if form.is_valid():
         job = form.save(commit=False)
+        job.user = request.user
 
-        # Prefer coords from Google Places pick when present
         place_lat = request.POST.get('place_lat', '').strip()
         place_lng = request.POST.get('place_lng', '').strip()
         place_display = request.POST.get('place_display', '').strip()
@@ -211,7 +269,6 @@ def add_job(request):
                 job.lat = float(place_lat)
                 job.lng = float(place_lng)
                 job.geocode_display = (place_display or job.location)[:255]
-                # Prefer rooftop pin when Google can resolve the selected full address
                 if place_display and google_maps_key():
                     refined = google_geocode(place_display.replace(' · ', ', '))
                     if refined and refined.get('lat') is not None:
@@ -239,33 +296,34 @@ def add_job(request):
         job.status = Job.Status.PENDING
         job.route_order = None
         job.save()
-        # Invalidate auto order but keep done/skipped jobs
-        DayRoute.objects.all().update(order_locked=False)
-        Job.objects.filter(status=Job.Status.PENDING).update(
+        DayRoute.objects.filter(user=request.user).update(order_locked=False)
+        Job.objects.filter(user=request.user, status=Job.Status.PENDING).update(
             route_order=None,
             estimated_arrival=None,
             leg_miles_from_previous=None,
             leg_minutes_from_previous=None,
         )
-        DayRoute.objects.all().delete()
+        DayRoute.objects.filter(user=request.user).delete()
         return redirect('dashboard')
 
     messages.error(request, 'Could not add job — check the form.')
     return redirect('dashboard')
 
 
+@login_required
 @require_POST
 def delete_job(request, pk):
-    job = get_object_or_404(Job, pk=pk)
+    job = _user_job(request, pk)
     job.delete()
-    plan_current_route(unlock=False)
+    plan_current_route(request.user, unlock=False)
     messages.info(request, 'Job removed.')
     return redirect('dashboard')
 
 
+@login_required
 @require_POST
 def update_appointment(request, pk):
-    job = get_object_or_404(Job, pk=pk)
+    job = _user_job(request, pk)
     form = AppointmentTypeForm(
         request.POST,
         instance=job,
@@ -275,18 +333,18 @@ def update_appointment(request, pk):
         changed = form.has_changed()
         form.save()
         if changed and job.status == Job.Status.PENDING:
-            DayRoute.objects.all().update(order_locked=False)
+            DayRoute.objects.filter(user=request.user).update(order_locked=False)
             messages.success(
                 request,
                 f'Updated to {job.appointment_short}. Hit Plan best route to re-order.',
             )
-            Job.objects.filter(status=Job.Status.PENDING).update(
+            Job.objects.filter(user=request.user, status=Job.Status.PENDING).update(
                 route_order=None,
                 estimated_arrival=None,
                 leg_miles_from_previous=None,
                 leg_minutes_from_previous=None,
             )
-            DayRoute.objects.all().delete()
+            DayRoute.objects.filter(user=request.user).delete()
         else:
             messages.info(request, 'Appointment unchanged.')
     else:
@@ -294,9 +352,10 @@ def update_appointment(request, pk):
     return redirect('dashboard')
 
 
+@login_required
 @require_POST
 def update_notes(request, pk):
-    job = get_object_or_404(Job, pk=pk)
+    job = _user_job(request, pk)
     form = JobNotesForm(
         request.POST,
         instance=job,
@@ -310,9 +369,10 @@ def update_notes(request, pk):
     return redirect('dashboard')
 
 
+@login_required
 @require_POST
 def mark_job(request, pk):
-    job = get_object_or_404(Job, pk=pk)
+    job = _user_job(request, pk)
     action = request.POST.get('action', '')
     if action == 'done':
         set_job_status(job, Job.Status.DONE)
@@ -328,6 +388,7 @@ def mark_job(request, pk):
     return redirect('dashboard')
 
 
+@login_required
 @require_POST
 def reorder_jobs(request):
     raw = request.POST.get('order', '')
@@ -339,7 +400,14 @@ def reorder_jobs(request):
     if not ids:
         return JsonResponse({'ok': False, 'error': 'empty'}, status=400)
 
-    plan = apply_manual_order(ids)
+    owned = set(
+        Job.objects.filter(user=request.user, id__in=ids).values_list('id', flat=True)
+    )
+    ids = [i for i in ids if i in owned]
+    if not ids:
+        return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
+
+    plan = apply_manual_order(request.user, ids)
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse(
             {
@@ -353,16 +421,18 @@ def reorder_jobs(request):
     return redirect('dashboard')
 
 
+@login_required
 @require_POST
 def unlock_order(request):
-    DayRoute.objects.all().update(order_locked=False)
+    DayRoute.objects.filter(user=request.user).update(order_locked=False)
     messages.info(request, 'Order unlocked — Plan best route to auto-optimise again.')
     return redirect('dashboard')
 
 
+@login_required
 @require_POST
 def plan_route(request):
-    plan = plan_current_route(unlock=True)
+    plan = plan_current_route(request.user, unlock=True)
     for warning in plan.warnings:
         messages.warning(request, warning)
     if plan.job_count:
@@ -377,12 +447,14 @@ def plan_route(request):
     return redirect('dashboard')
 
 
+@login_required
 def settings_view(request):
-    settings = EngineerSettings.get_solo()
+    settings = EngineerSettings.for_user(request.user)
     if request.method == 'POST':
         form = SettingsForm(request.POST, instance=settings)
         if form.is_valid():
             obj = form.save(commit=False)
+            obj.user = request.user
             obj.start_lat = None
             obj.start_lng = None
             obj.start_display = ''
@@ -419,9 +491,10 @@ def settings_view(request):
     )
 
 
+@login_required
 @require_POST
 def clear_route(request):
-    count = Job.objects.count()
-    clear_current_route(clear_jobs=True)
+    count = Job.objects.filter(user=request.user).count()
+    clear_current_route(request.user, clear_jobs=True)
     messages.info(request, f'Route cleared ({count} job(s) removed).')
     return redirect('dashboard')

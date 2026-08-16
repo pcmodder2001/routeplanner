@@ -5,6 +5,7 @@ Local Django app for planning a day's Openreach jobs with AM / PM / all-day appo
 ## Features
 
 - Add jobs by **address or postcode** (street names resolved automatically)
+- **Login** with optional **Remember me** (90 days); each user only sees their own jobs/routes
 - Appointment types:
   - **AM** (8am–1pm) — routed first
   - **PM** (1pm–6pm) — routed after AM

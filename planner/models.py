@@ -1,10 +1,18 @@
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
 
 class EngineerSettings(models.Model):
-    """Singleton-style settings: start/depot location for the day."""
+    """Per-user start/depot location for the day."""
 
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='engineer_settings',
+        null=True,
+        blank=True,
+    )
     start_label = models.CharField(
         max_length=200,
         blank=True,
@@ -30,11 +38,12 @@ class EngineerSettings(models.Model):
         verbose_name_plural = 'Engineer settings'
 
     def __str__(self):
-        return self.start_location or 'No start location set'
+        who = self.user.username if self.user_id else 'unassigned'
+        return f'{who}: {self.start_location or "No start location set"}'
 
     @classmethod
-    def get_solo(cls):
-        obj, _ = cls.objects.get_or_create(pk=1)
+    def for_user(cls, user):
+        obj, _ = cls.objects.get_or_create(user=user)
         return obj
 
 
@@ -49,6 +58,13 @@ class Job(models.Model):
         DONE = 'done', 'Done'
         SKIPPED = 'skipped', 'Skipped'
 
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='jobs',
+        null=True,
+        blank=True,
+    )
     job_date = models.DateField(default=timezone.localdate)
     reference = models.CharField(
         max_length=100,
@@ -108,9 +124,16 @@ class Job(models.Model):
 
 
 class DayRoute(models.Model):
-    """Saved road geometry + totals for a planned day."""
+    """Saved road geometry + totals for a planned day (per user)."""
 
-    job_date = models.DateField(unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='day_routes',
+        null=True,
+        blank=True,
+    )
+    job_date = models.DateField()
     geometry = models.JSONField(
         default=list,
         help_text='List of [lat, lng] points along the driving route',
@@ -126,6 +149,13 @@ class DayRoute(models.Model):
 
     class Meta:
         ordering = ['-job_date']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'job_date'],
+                name='planner_dayroute_user_job_date_uniq',
+            ),
+        ]
 
     def __str__(self):
-        return f'Route for {self.job_date} ({self.total_miles:.1f} mi)'
+        who = self.user.username if self.user_id else 'unassigned'
+        return f'{who} route for {self.job_date} ({self.total_miles:.1f} mi)'

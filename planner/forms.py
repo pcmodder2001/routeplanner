@@ -3,6 +3,34 @@ from django import forms
 from .models import EngineerSettings, Job
 
 
+class LoginForm(forms.Form):
+    username = forms.CharField(
+        max_length=150,
+        widget=forms.TextInput(
+            attrs={
+                'class': 'input',
+                'placeholder': 'Username',
+                'autofocus': True,
+                'autocomplete': 'username',
+            }
+        ),
+    )
+    password = forms.CharField(
+        widget=forms.PasswordInput(
+            attrs={
+                'class': 'input',
+                'placeholder': 'Password',
+                'autocomplete': 'current-password',
+            }
+        ),
+    )
+    remember_me = forms.BooleanField(
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={'class': 'checkbox'}),
+    )
+
+
 class JobForm(forms.ModelForm):
     class Meta:
         model = Job

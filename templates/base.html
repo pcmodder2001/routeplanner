@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="/static/css/app.css">
   {% block extra_head %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="{% url 'dashboard' %}">
@@ -22,9 +22,16 @@
         </span>
       </a>
       <nav class="nav">
+        {% if user.is_authenticated %}
         <a href="{% url 'dashboard' %}">Today</a>
         <a href="{% url 'settings' %}">Start point</a>
-        <a href="/admin/">Admin</a>
+        {% if user.is_staff %}<a href="/admin/">Admin</a>{% endif %}
+        <span class="nav-user">{{ user.username }}</span>
+        <form method="post" action="{% url 'logout' %}" class="nav-logout">
+          {% csrf_token %}
+          <button type="submit" class="btn-link">Sign out</button>
+        </form>
+        {% endif %}
       </nav>
     </div>
   </header>

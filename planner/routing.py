@@ -375,23 +375,24 @@ def ensure_start_geocoded(settings: EngineerSettings) -> str | None:
     return None
 
 
-def clear_current_route(*, clear_jobs: bool = False) -> None:
-    """Reset planned order/geometry. Optionally wipe all jobs (evening clear)."""
+def clear_current_route(user, *, clear_jobs: bool = False) -> None:
+    """Reset planned order/geometry for this user. Optionally wipe all their jobs."""
+    jobs = Job.objects.filter(user=user)
     if clear_jobs:
-        Job.objects.all().delete()
+        jobs.delete()
     else:
-        Job.objects.filter(status=Job.Status.PENDING).update(
+        jobs.filter(status=Job.Status.PENDING).update(
             route_order=None,
             estimated_arrival=None,
             leg_miles_from_previous=None,
             leg_minutes_from_previous=None,
         )
-    DayRoute.objects.all().delete()
+    DayRoute.objects.filter(user=user).delete()
 
 
-def get_or_create_day_route() -> DayRoute:
+def get_or_create_day_route(user) -> DayRoute:
     route_date = timezone.localdate()
-    obj, _ = DayRoute.objects.get_or_create(job_date=route_date)
+    obj, _ = DayRoute.objects.get_or_create(user=user, job_date=route_date)
     return obj
 
 
@@ -420,6 +421,7 @@ def resolve_start_point(
 
 def _persist_ordered_jobs(
     *,
+    user,
     start: Point,
     ordered_jobs: list[Job],
     road_path,
@@ -432,7 +434,7 @@ def _persist_ordered_jobs(
     warnings: list[str],
 ) -> RoutePlan:
     # Clear route fields on pending jobs first
-    Job.objects.filter(status=Job.Status.PENDING).update(
+    Job.objects.filter(user=user, status=Job.Status.PENDING).update(
         route_order=None,
         estimated_arrival=None,
         leg_miles_from_previous=None,
@@ -470,6 +472,7 @@ def _persist_ordered_jobs(
     total_minutes = max(0, int(round(road_path.minutes)))
 
     DayRoute.objects.update_or_create(
+        user=user,
         job_date=route_date,
         defaults={
             'geometry': road_path.geometry,
@@ -530,9 +533,9 @@ def _persist_ordered_jobs(
     )
 
 
-def plan_current_route(*, unlock: bool = True) -> RoutePlan:
+def plan_current_route(user, *, unlock: bool = True) -> RoutePlan:
     """Optimise pending jobs (AM/PM/all-day). Ignores done/skipped."""
-    settings = EngineerSettings.get_solo()
+    settings = EngineerSettings.for_user(user)
     warnings: list[str] = []
     route_date = timezone.localdate()
 
@@ -540,7 +543,7 @@ def plan_current_route(*, unlock: bool = True) -> RoutePlan:
     if start_warning:
         warnings.append(start_warning)
 
-    all_jobs = list(Job.objects.all())
+    all_jobs = list(Job.objects.filter(user=user))
     warnings.extend(ensure_geocoded(all_jobs))
 
     pending = [
@@ -549,8 +552,8 @@ def plan_current_route(*, unlock: bool = True) -> RoutePlan:
         if j.is_geocoded and j.status == Job.Status.PENDING
     ]
     if not pending:
-        DayRoute.objects.filter(job_date=route_date).delete()
-        Job.objects.filter(status=Job.Status.PENDING).update(
+        DayRoute.objects.filter(user=user, job_date=route_date).delete()
+        Job.objects.filter(user=user, status=Job.Status.PENDING).update(
             route_order=None,
             estimated_arrival=None,
             leg_miles_from_previous=None,
@@ -566,13 +569,13 @@ def plan_current_route(*, unlock: bool = True) -> RoutePlan:
             source='',
         )
 
-    day_route = DayRoute.objects.filter(job_date=route_date).first()
+    day_route = DayRoute.objects.filter(user=user, job_date=route_date).first()
     order_locked = bool(day_route and day_route.order_locked and not unlock)
 
     start = resolve_start_point(settings, pending)
     # If some jobs are done, start routing remaining from last completed stop
     last_done = (
-        Job.objects.filter(status=Job.Status.DONE, lat__isnull=False)
+        Job.objects.filter(user=user, status=Job.Status.DONE, lat__isnull=False)
         .order_by('-route_order', '-id')
         .first()
     )
@@ -658,6 +661,7 @@ def plan_current_route(*, unlock: bool = True) -> RoutePlan:
         )
 
     return _persist_ordered_jobs(
+        user=user,
         start=start,
         ordered_jobs=ordered_jobs,
         road_path=road_path,
@@ -671,9 +675,9 @@ def plan_current_route(*, unlock: bool = True) -> RoutePlan:
     )
 
 
-def apply_manual_order(job_ids: Sequence[int]) -> RoutePlan:
+def apply_manual_order(user, job_ids: Sequence[int]) -> RoutePlan:
     """Lock route to the given pending job id order and recompute times/path."""
-    settings = EngineerSettings.get_solo()
+    settings = EngineerSettings.for_user(user)
     warnings: list[str] = []
     route_date = timezone.localdate()
 
@@ -681,24 +685,27 @@ def apply_manual_order(job_ids: Sequence[int]) -> RoutePlan:
     if start_warning:
         warnings.append(start_warning)
 
-    pending_qs = Job.objects.filter(status=Job.Status.PENDING, id__in=job_ids)
+    pending_qs = Job.objects.filter(
+        user=user, status=Job.Status.PENDING, id__in=job_ids
+    )
     by_id = {j.id: j for j in pending_qs}
     ordered_jobs = [by_id[i] for i in job_ids if i in by_id]
     warnings.extend(ensure_geocoded(ordered_jobs))
     ordered_jobs = [j for j in ordered_jobs if j.is_geocoded]
 
     if not ordered_jobs:
-        return plan_current_route(unlock=True)
+        return plan_current_route(user, unlock=True)
 
     # Mark locked before planning path
     DayRoute.objects.update_or_create(
+        user=user,
         job_date=route_date,
         defaults={'order_locked': True},
     )
 
     start = resolve_start_point(settings, ordered_jobs)
     last_done = (
-        Job.objects.filter(status=Job.Status.DONE, lat__isnull=False)
+        Job.objects.filter(user=user, status=Job.Status.DONE, lat__isnull=False)
         .order_by('-id')
         .first()
     )
@@ -728,6 +735,7 @@ def apply_manual_order(job_ids: Sequence[int]) -> RoutePlan:
     warnings.append('Route order locked to your manual arrangement.')
 
     return _persist_ordered_jobs(
+        user=user,
         start=start,
         ordered_jobs=ordered_jobs,
         road_path=road_path,
@@ -742,6 +750,7 @@ def apply_manual_order(job_ids: Sequence[int]) -> RoutePlan:
 
 
 def set_job_status(job: Job, status: str, *, replan: bool = True) -> RoutePlan | None:
+    user = job.user
     job.status = status
     if status != Job.Status.PENDING:
         job.route_order = None
@@ -757,24 +766,25 @@ def set_job_status(job: Job, status: str, *, replan: bool = True) -> RoutePlan |
             'leg_minutes_from_previous',
         ]
     )
-    if not replan:
+    if not replan or user is None:
         return None
-    day = DayRoute.objects.order_by('-updated_at').first()
+    day = DayRoute.objects.filter(user=user).order_by('-updated_at').first()
     if day and day.order_locked:
         remaining_ids = list(
-            Job.objects.filter(status=Job.Status.PENDING).order_by('route_order', 'id')
+            Job.objects.filter(user=user, status=Job.Status.PENDING)
+            .order_by('route_order', 'id')
             .values_list('id', flat=True)
         )
         if remaining_ids:
-            return apply_manual_order(remaining_ids)
-    return plan_current_route(unlock=True)
+            return apply_manual_order(user, remaining_ids)
+    return plan_current_route(user, unlock=True)
 
 
-def next_job_navigate_url() -> tuple[Job | None, str]:
+def next_job_navigate_url(user) -> tuple[Job | None, str]:
     """One-tap Google Maps directions to the next pending stop only."""
-    settings = EngineerSettings.get_solo()
+    settings = EngineerSettings.for_user(user)
     nxt = (
-        Job.objects.filter(status=Job.Status.PENDING, lat__isnull=False)
+        Job.objects.filter(user=user, status=Job.Status.PENDING, lat__isnull=False)
         .order_by('route_order', 'id')
         .first()
     )
@@ -784,7 +794,7 @@ def next_job_navigate_url() -> tuple[Job | None, str]:
     origin_lat = settings.start_lat
     origin_lng = settings.start_lng
     last_done = (
-        Job.objects.filter(status=Job.Status.DONE, lat__isnull=False)
+        Job.objects.filter(user=user, status=Job.Status.DONE, lat__isnull=False)
         .order_by('-id')
         .first()
     )

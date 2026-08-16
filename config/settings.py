@@ -135,6 +135,16 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'dashboard'
+LOGOUT_REDIRECT_URL = 'login'
+
+# Sessions: "Remember me" extends to 90 days; sliding expiry while active
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 90
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
