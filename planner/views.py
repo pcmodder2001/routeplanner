@@ -5,7 +5,14 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from .forms import AppointmentTypeForm, JobForm, JobNotesForm, LoginForm, SettingsForm
+from .forms import (
+    AppointmentTypeForm,
+    JobForm,
+    JobNotesForm,
+    LoginForm,
+    RegisterForm,
+    SettingsForm,
+)
 from .geocoding import (
     address_autocomplete,
     address_lookup_enabled,
@@ -70,6 +77,26 @@ def login_view(request):
             'next': request.GET.get('next', ''),
         },
     )
+
+
+@require_http_methods(['GET', 'POST'])
+def register_view(request):
+    if request.user.is_authenticated:
+        return redirect('dashboard')
+
+    form = RegisterForm(request.POST or None)
+    if request.method == 'POST' and form.is_valid():
+        user = form.save()
+        login(request, user)
+        if form.cleaned_data.get('remember_me'):
+            request.session.set_expiry(REMEMBER_ME_SECONDS)
+        else:
+            request.session.set_expiry(0)
+        EngineerSettings.for_user(user)
+        messages.success(request, f'Welcome, {user.username} — account created.')
+        return redirect('dashboard')
+
+    return render(request, 'planner/register.html', {'form': form})
 
 
 @require_POST

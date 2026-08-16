@@ -158,6 +158,19 @@ a { color: var(--primary); }
   height: 1.05rem;
 }
 
+.auth-switch {
+  margin: 1.1rem 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
 .page {
   max-width: 1180px;
   margin: 0 auto;
