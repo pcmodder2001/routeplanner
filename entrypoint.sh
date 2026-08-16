@@ -3,10 +3,17 @@ set -e
 
 export DJANGO_SETTINGS_MODULE="${DJANGO_SETTINGS_MODULE:-config.settings}"
 
-# Ensure SQLite directory exists and is writable
-DATA_DIR="$(dirname "${SQLITE_PATH:-/data/db.sqlite3}")"
-mkdir -p "$DATA_DIR"
-touch "$DATA_DIR/.write_test" && rm -f "$DATA_DIR/.write_test"
+# SQLite local volume only when not using PostgreSQL
+DB_ENGINE="$(echo "${DB_ENGINE:-}" | tr '[:upper:]' '[:lower:]')"
+case "$DB_ENGINE" in
+  postgresql|postgres|django.db.backends.postgresql)
+    ;;
+  *)
+    DATA_DIR="$(dirname "${SQLITE_PATH:-/data/db.sqlite3}")"
+    mkdir -p "$DATA_DIR"
+    touch "$DATA_DIR/.write_test" && rm -f "$DATA_DIR/.write_test"
+    ;;
+esac
 
 python manage.py migrate --noinput
 

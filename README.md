@@ -16,7 +16,7 @@ Local Django app for planning a day's Openreach jobs with AM / PM / all-day appo
 - Accurate driving miles + minutes between stops
 - Map view + **Open in Google Maps** link
 - **Clear route** wipes everything ready for the next day
-- Local **SQLite** database
+- Local **SQLite** by default, or **PostgreSQL** via `DB_*` env vars
 
 ## Daily workflow
 
@@ -35,6 +35,7 @@ Container listens on **8889** on the **host network** (same as other SiteMatrix 
 
 Optional env vars (compose / `.env`):
 
+- `DB_ENGINE=postgresql` plus `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` — use PostgreSQL (otherwise SQLite)
 - `GOOGLE_MAPS_API_KEY` — traffic times, street autocomplete, and **postcode + door number** → full address (free)
 - `IDEAL_POSTCODES_API_KEY` — optional paid PAF pick-list of every address at a postcode (getAddress.io shut down; no free equivalent)
 - `OPENROUTESERVICE_API_KEY` — optional road times without Google
