@@ -481,8 +481,106 @@ a { color: var(--primary); }
 
 .drag-hint { margin: 0 0 0.75rem; }
 
-.job-card[draggable="true"] { cursor: grab; }
+.job-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.reorder-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.btn-move,
+.drag-handle {
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  letter-spacing: -0.08em;
+  font-size: 0.95rem;
+}
+
+.drag-handle:active { cursor: grabbing; }
+
 .job-card.dragging { opacity: 0.55; }
+
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+.job-address {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.btn-copy {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+  flex-shrink: 0;
+}
+
+.btn-copy.copied {
+  background: var(--am);
+  border-color: var(--am);
+  color: #fff;
+}
+
+.ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding: 0.2rem 0.15rem;
+}
+
+.ref-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.job-ref {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: #eef3ec;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+}
 
 .job-card.status-done,
 .job-card.status-skipped {
@@ -503,6 +601,21 @@ a { color: var(--primary); }
   flex-wrap: wrap;
   gap: 0.4rem;
   margin-top: 0.65rem;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.actions-row .grow {
+  flex: 1 1 12rem;
+}
+
+.btn-nav {
+  flex-shrink: 0;
+  min-height: 3rem;
+  padding-left: 1.25rem;
+  padding-right: 1.25rem;
 }
 
 .hidden { display: none; }
@@ -640,10 +753,92 @@ a { color: var(--primary); }
 }
 
 @media (max-width: 860px) {
-  .layout { grid-template-columns: 1fr; }
+  .layout {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .panel-main { order: 1; }
+  .panel-add { order: 2; }
+
+  .page {
+    padding: 0.85rem 0.85rem 5.5rem;
+  }
+
   .hero-bar {
     flex-direction: column;
     align-items: stretch;
+    margin-bottom: 0.75rem;
   }
-  .topbar-inner { flex-wrap: wrap; }
+
+  .hero-bar h1 { font-size: 1.35rem; }
+  .lede { font-size: 0.9rem; }
+
+  .topbar-inner {
+    flex-wrap: wrap;
+    padding: 0.65rem 0.85rem;
+    gap: 0.5rem;
+  }
+
+  .nav {
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    font-size: 0.9rem;
+  }
+
+  .nav-user { display: none; }
+
+  .next-bar {
+    position: sticky;
+    top: 0.4rem;
+    z-index: 18;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .next-bar .btn-nav {
+    width: 100%;
+  }
+
+  .job-card {
+    gap: 0.55rem;
+    padding: 0.75rem;
+  }
+
+  .btn-tiny {
+    min-height: 2.5rem;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.88rem;
+  }
+
+  .btn-move,
+  .drag-handle {
+    width: 2.6rem;
+    height: 2.6rem;
+  }
+
+  /* Prefer ↑↓ on phones; drag handle is secondary */
+  .drag-handle {
+    display: none;
+  }
+
+  .map {
+    height: 14rem;
+    margin-top: 1rem;
+  }
+
+  .panel {
+    padding: 0.95rem;
+  }
+
+  .btn {
+    min-height: 2.85rem;
+  }
 }
+
+@media (min-width: 861px) {
+  .btn-move { display: none; }
+}
+

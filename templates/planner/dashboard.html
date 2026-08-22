@@ -7,7 +7,7 @@
   <div>
     <h1>Today's route</h1>
     <p class="lede">
-      AM first, PM after, all-day slotted to fit. Drag to lock your own order. Mark done/skip as you go.
+      AM first, PM after. Use ↑↓ or the handle to reorder. Tap Copy for job numbers.
     </p>
   </div>
 </section>
@@ -25,19 +25,19 @@
 
 {% if next_nav_url %}
 <div class="next-bar">
-  <div>
+  <div class="next-bar-text">
     <div class="next-label">Next stop</div>
-    <strong>{{ next_job.geocode_display|default:next_job.location }}</strong>
+    <strong class="selectable">{{ next_job.geocode_display|default:next_job.location }}</strong>
     {% if next_job.estimated_arrival %}
     <span class="meta">ETA ~{{ next_job.estimated_arrival|time:"H:i" }} · {{ next_job.leg_minutes_from_previous }} min drive</span>
     {% endif %}
   </div>
-  <a class="btn btn-accent" href="{{ next_nav_url }}" target="_blank" rel="noopener">Navigate</a>
+  <a class="btn btn-accent btn-nav" href="{{ next_nav_url }}" target="_blank" rel="noopener">Navigate</a>
 </div>
 {% endif %}
 
 <div class="layout">
-  <aside class="panel">
+  <aside class="panel panel-add">
     <h2>Add job</h2>
     <form method="post" action="{% url 'add_job' %}" class="stack" id="add-job-form" autocomplete="off">
       {% csrf_token %}
@@ -51,28 +51,28 @@
       {{ job_form.appointment_type }}
       {{ job_form.reference }}
       {{ job_form.notes }}
-      <button type="submit" class="btn btn-primary">Add job</button>
+      <button type="submit" class="btn btn-primary btn-block">Add job</button>
       {% if google_places_enabled %}
-      <p class="meta">Type like Maps: <code>WF16 9PF 22</code>, <code>WF12 8AJ Esso</code>, or a street / business name.</p>
+      <p class="meta">Try <code>WF16 9PF 22</code> or <code>WF12 8AJ ESSO</code>.</p>
       {% endif %}
     </form>
 
     <div class="actions-row">
-      <form method="post" action="{% url 'plan_route' %}">
+      <form method="post" action="{% url 'plan_route' %}" class="grow">
         {% csrf_token %}
-        <button type="submit" class="btn btn-accent" {% if not pending_count %}disabled{% endif %}>
+        <button type="submit" class="btn btn-accent btn-block" {% if not pending_count %}disabled{% endif %}>
           {% if has_route %}Re-plan route{% else %}Plan best route{% endif %}
         </button>
       </form>
       {% if maps_url %}
-      <a class="btn btn-ghost" href="{{ maps_url }}" target="_blank" rel="noopener">Full day in Maps</a>
+      <a class="btn btn-ghost btn-block" href="{{ maps_url }}" target="_blank" rel="noopener">Full day in Maps</a>
       {% endif %}
     </div>
 
     {% if order_locked %}
     <form method="post" action="{% url 'unlock_order' %}" class="stack" style="margin-top:0.75rem">
       {% csrf_token %}
-      <button type="submit" class="btn btn-ghost">Unlock order (allow auto plan)</button>
+      <button type="submit" class="btn btn-ghost btn-block">Unlock order (allow auto plan)</button>
     </form>
     {% endif %}
 
@@ -102,38 +102,55 @@
     </div>
 
     {% if jobs %}
-    <p class="meta drag-hint">Drag pending jobs to set your own order (locks auto-routing).</p>
+    <p class="meta drag-hint">Reorder with ↑↓ (or the ⋮⋮ handle on desktop). Text stays selectable to copy.</p>
     <ol class="job-list" id="job-list">
       {% for row in job_rows %}
       {% with job=row.job %}
       <li class="job-card type-{{ job.appointment_type }} status-{{ job.status }}"
           data-id="{{ job.pk }}"
-          data-status="{{ job.status }}"
-          {% if job.status == 'pending' %}draggable="true"{% endif %}>
-        <div class="job-order">
-          {% if job.status == 'pending' and job.route_order %}
-          <span class="order-num">{{ job.route_order }}</span>
-          {% elif job.status == 'done' %}
-          <span class="order-num done">✓</span>
-          {% elif job.status == 'skipped' %}
-          <span class="order-num skipped">–</span>
-          {% else %}
-          <span class="order-num muted">–</span>
+          data-status="{{ job.status }}">
+        <div class="job-side">
+          <div class="job-order">
+            {% if job.status == 'pending' and job.route_order %}
+            <span class="order-num">{{ job.route_order }}</span>
+            {% elif job.status == 'done' %}
+            <span class="order-num done">✓</span>
+            {% elif job.status == 'skipped' %}
+            <span class="order-num skipped">–</span>
+            {% else %}
+            <span class="order-num muted">–</span>
+            {% endif %}
+          </div>
+          {% if job.status == 'pending' %}
+          <div class="reorder-controls">
+            <button type="button" class="btn-move" data-dir="up" aria-label="Move up" title="Move up">↑</button>
+            <button type="button" class="btn-move" data-dir="down" aria-label="Move down" title="Move down">↓</button>
+            <button type="button" class="drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
+          </div>
           {% endif %}
         </div>
         <div class="job-body">
           <div class="job-top">
-            <strong>{% if job.geocode_display %}{{ job.geocode_display }}{% else %}{{ job.location }}{% endif %}</strong>
+            <strong class="selectable job-address">{% if job.geocode_display %}{{ job.geocode_display }}{% else %}{{ job.location }}{% endif %}</strong>
+            <button type="button" class="btn-copy"
+                    data-copy="{% if job.geocode_display %}{{ job.geocode_display }}{% else %}{{ job.location }}{% endif %}"
+                    aria-label="Copy address">Copy</button>
             <span class="tag tag-{{ job.appointment_type }}">{{ job.appointment_short }}</span>
             {% if job.status != 'pending' %}
             <span class="tag tag-status">{{ job.get_status_display }}</span>
             {% endif %}
           </div>
           {% if job.geocode_display and job.location|upper != job.geocode_display|upper %}
-          <div class="meta">Entered: {{ job.location }}</div>
+          <div class="meta selectable">Entered: {{ job.location }}</div>
           {% endif %}
           <div class="meta-row">
-            {% if job.reference %}<span>Ref: {{ job.reference }}</span>{% endif %}
+            {% if job.reference %}
+            <span class="ref-chip">
+              <span class="ref-label">Ref</span>
+              <code class="selectable job-ref">{{ job.reference }}</code>
+              <button type="button" class="btn-copy" data-copy="{{ job.reference }}" aria-label="Copy job number">Copy</button>
+            </span>
+            {% endif %}
             {% if job.status == 'pending' and job.estimated_arrival %}<span>ETA ~{{ job.estimated_arrival|time:"H:i" }}</span>{% endif %}
             {% if job.status == 'pending' and job.leg_minutes_from_previous != None %}<span>{{ job.leg_minutes_from_previous }} min drive</span>{% endif %}
             {% if job.status == 'pending' and job.leg_miles_from_previous != None %}<span>{{ job.leg_miles_from_previous }} mi</span>{% endif %}
@@ -191,7 +208,7 @@
     {% else %}
     <div class="empty">
       <p>No jobs yet.</p>
-      <p>Add postcodes or addresses on the left, then hit <strong>Plan best route</strong>.</p>
+      <p>Add a postcode or address below, then hit <strong>Plan best route</strong>.</p>
     </div>
     {% endif %}
 
@@ -383,37 +400,99 @@
     }
   }
 
-  // Drag reorder for pending jobs
+  // Copy buttons + reorder (handle drag / ↑↓) — card body stays selectable
+  function copyText(text, btn) {
+    if (!text) return;
+    const done = function () {
+      if (!btn) return;
+      const prev = btn.textContent;
+      btn.textContent = 'Copied';
+      btn.classList.add('copied');
+      setTimeout(function () {
+        btn.textContent = prev;
+        btn.classList.remove('copied');
+      }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        window.prompt('Copy:', text);
+      });
+    } else {
+      window.prompt('Copy:', text);
+    }
+  }
+
+  document.querySelectorAll('.btn-copy').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      copyText(btn.getAttribute('data-copy') || '', btn);
+    });
+  });
+
   const list = document.getElementById('job-list');
   const form = document.getElementById('reorder-form');
   const input = document.getElementById('reorder-input');
   if (!list || !form || !input) return;
 
+  function pendingCards() {
+    return Array.from(list.querySelectorAll('.job-card[data-status="pending"]'));
+  }
+
+  function submitOrder() {
+    const ids = pendingCards().map(function (el) { return el.getAttribute('data-id'); });
+    input.value = ids.join(',');
+    form.submit();
+  }
+
+  function moveCard(card, dir) {
+    const cards = pendingCards();
+    const idx = cards.indexOf(card);
+    if (idx < 0) return;
+    if (dir === 'up' && idx > 0) {
+      list.insertBefore(card, cards[idx - 1]);
+      submitOrder();
+    } else if (dir === 'down' && idx < cards.length - 1) {
+      list.insertBefore(cards[idx + 1], card);
+      submitOrder();
+    }
+  }
+
+  list.querySelectorAll('.btn-move').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = btn.closest('.job-card');
+      if (card) moveCard(card, btn.getAttribute('data-dir'));
+    });
+  });
+
   let dragEl = null;
-  list.querySelectorAll('.job-card[draggable="true"]').forEach(function (card) {
-    card.addEventListener('dragstart', function (e) {
+  list.querySelectorAll('.drag-handle').forEach(function (handle) {
+    handle.addEventListener('dragstart', function (e) {
+      const card = handle.closest('.job-card');
+      if (!card) return;
       dragEl = card;
       card.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', card.getAttribute('data-id') || ''); } catch (err) {}
     });
-    card.addEventListener('dragend', function () {
-      card.classList.remove('dragging');
+    handle.addEventListener('dragend', function () {
+      if (dragEl) dragEl.classList.remove('dragging');
       dragEl = null;
-      const ids = Array.from(list.querySelectorAll('.job-card[data-status="pending"]'))
-        .map(function (el) { return el.getAttribute('data-id'); });
-      input.value = ids.join(',');
-      form.submit();
+      submitOrder();
     });
   });
 
   list.addEventListener('dragover', function (e) {
+    if (!dragEl) return;
     e.preventDefault();
-    const after = Array.from(list.querySelectorAll('.job-card[data-status="pending"]:not(.dragging)'))
+    const after = pendingCards()
+      .filter(function (el) { return el !== dragEl; })
       .find(function (el) {
         const box = el.getBoundingClientRect();
         return e.clientY < box.top + box.height / 2;
       });
-    if (!dragEl) return;
     if (after) list.insertBefore(dragEl, after);
     else {
       const firstFinished = list.querySelector('.job-card:not([data-status="pending"])');
