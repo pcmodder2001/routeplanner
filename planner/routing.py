@@ -749,35 +749,19 @@ def apply_manual_order(user, job_ids: Sequence[int]) -> RoutePlan:
     )
 
 
-def set_job_status(job: Job, status: str, *, replan: bool = True) -> RoutePlan | None:
-    user = job.user
+def set_job_status(job: Job, status: str, *, replan: bool = False) -> RoutePlan | None:
+    """
+    Update job status without reshuffling the day's plan.
+
+    Remaining pending stops keep their original route numbers, ETAs, and
+    miles/minutes-from-previous so marking one done does not renumber the rest.
+    """
     job.status = status
-    if status != Job.Status.PENDING:
-        job.route_order = None
-        job.estimated_arrival = None
-        job.leg_miles_from_previous = None
-        job.leg_minutes_from_previous = None
-    job.save(
-        update_fields=[
-            'status',
-            'route_order',
-            'estimated_arrival',
-            'leg_miles_from_previous',
-            'leg_minutes_from_previous',
-        ]
-    )
-    if not replan or user is None:
+    job.save(update_fields=['status'])
+    if not replan or job.user is None:
         return None
-    day = DayRoute.objects.filter(user=user).order_by('-updated_at').first()
-    if day and day.order_locked:
-        remaining_ids = list(
-            Job.objects.filter(user=user, status=Job.Status.PENDING)
-            .order_by('route_order', 'id')
-            .values_list('id', flat=True)
-        )
-        if remaining_ids:
-            return apply_manual_order(user, remaining_ids)
-    return plan_current_route(user, unlock=True)
+    # Optional replan only when explicitly requested (e.g. after a full unlock)
+    return plan_current_route(job.user, unlock=True)
 
 
 def next_job_navigate_url(user) -> tuple[Job | None, str]:
@@ -795,7 +779,7 @@ def next_job_navigate_url(user) -> tuple[Job | None, str]:
     origin_lng = settings.start_lng
     last_done = (
         Job.objects.filter(user=user, status=Job.Status.DONE, lat__isnull=False)
-        .order_by('-id')
+        .order_by('-route_order', '-id')
         .first()
     )
     if last_done and last_done.is_geocoded:

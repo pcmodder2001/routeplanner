@@ -110,17 +110,23 @@
           data-id="{{ job.pk }}"
           data-status="{{ job.status }}">
         <div class="job-side">
-          <div class="job-order">
-            {% if job.status == 'pending' and job.route_order %}
-            <span class="order-num">{{ job.route_order }}</span>
-            {% elif job.status == 'done' %}
-            <span class="order-num done">✓</span>
+        <div class="job-order">
+          {% if job.route_order %}
+            {% if job.status == 'done' %}
+            <span class="order-num done" title="Was stop {{ job.route_order }}">{{ job.route_order }}</span>
             {% elif job.status == 'skipped' %}
-            <span class="order-num skipped">–</span>
+            <span class="order-num skipped" title="Was stop {{ job.route_order }}">{{ job.route_order }}</span>
             {% else %}
-            <span class="order-num muted">–</span>
+            <span class="order-num">{{ job.route_order }}</span>
             {% endif %}
-          </div>
+          {% elif job.status == 'done' %}
+          <span class="order-num done">✓</span>
+          {% elif job.status == 'skipped' %}
+          <span class="order-num skipped">–</span>
+          {% else %}
+          <span class="order-num muted">–</span>
+          {% endif %}
+        </div>
           {% if job.status == 'pending' %}
           <div class="reorder-controls">
             <button type="button" class="btn-move" data-dir="up" aria-label="Move up" title="Move up">↑</button>
