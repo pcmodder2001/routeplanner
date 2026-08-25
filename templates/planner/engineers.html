@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Engineers · Route Planner{% endblock %}
+
+{% block content %}
+<section class="hero-bar">
+  <div>
+    <h1>Engineers</h1>
+    <p class="lede">Open an account to see their jobs and route as they do.</p>
+  </div>
+</section>
+
+{% if engineers %}
+<ul class="engineer-list">
+  {% for eng in engineers %}
+  <li class="engineer-card {% if view_as_user and view_as_user.pk == eng.pk %}is-active{% endif %}">
+    <div class="engineer-info">
+      <strong>{{ eng.username }}</strong>
+      <span class="meta">
+        {{ eng.pending_count }} pending
+        · {{ eng.job_count }} total
+        {% if eng.is_superuser %}· superuser{% endif %}
+      </span>
+    </div>
+    {% if eng.pk == user.pk %}
+    <form method="post" action="{% url 'stop_view_as' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-ghost">Your account</button>
+    </form>
+    {% else %}
+    <form method="post" action="{% url 'view_as_user' eng.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-primary">View route</button>
+    </form>
+    {% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty panel">
+  <p>No active accounts yet.</p>
+</div>
+{% endif %}
+{% endblock %}

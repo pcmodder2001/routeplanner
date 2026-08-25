@@ -25,6 +25,7 @@
         {% if user.is_authenticated %}
         <a href="{% url 'dashboard' %}">Today</a>
         <a href="{% url 'settings' %}">Start point</a>
+        {% if user.is_superuser %}<a href="{% url 'engineers' %}">Engineers</a>{% endif %}
         {% if user.is_staff %}<a href="/admin/">Admin</a>{% endif %}
         <span class="nav-user">{{ user.username }}</span>
         <form method="post" action="{% url 'logout' %}" class="nav-logout">
@@ -35,6 +36,16 @@
       </nav>
     </div>
   </header>
+
+  {% if view_as_user %}
+  <div class="view-as-bar">
+    <span>Viewing as <strong>{{ view_as_user.username }}</strong> — their jobs &amp; route</span>
+    <form method="post" action="{% url 'stop_view_as' %}">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-tiny">Back to my account</button>
+    </form>
+  </div>
+  {% endif %}
 
   {% if messages %}
   <div class="flash-wrap">

@@ -1,10 +1,17 @@
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from .acting import (
+    active_user,
+    clear_view_as,
+    list_engineers,
+    set_view_as,
+)
 from .forms import (
     AppointmentTypeForm,
     JobForm,
@@ -38,7 +45,11 @@ REMEMBER_ME_SECONDS = 60 * 60 * 24 * 90  # 90 days
 
 
 def _user_job(request, pk: int) -> Job:
-    return get_object_or_404(Job, pk=pk, user=request.user)
+    return get_object_or_404(Job, pk=pk, user=active_user(request))
+
+
+def _superuser_required(user):
+    return user.is_authenticated and user.is_superuser
 
 
 @require_http_methods(['GET', 'POST'])
@@ -59,6 +70,7 @@ def login_view(request):
             messages.error(request, 'This account is disabled.')
         else:
             login(request, user)
+            clear_view_as(request)
             if form.cleaned_data.get('remember_me'):
                 request.session.set_expiry(REMEMBER_ME_SECONDS)
             else:
@@ -88,6 +100,7 @@ def register_view(request):
     if request.method == 'POST' and form.is_valid():
         user = form.save()
         login(request, user)
+        clear_view_as(request)
         if form.cleaned_data.get('remember_me'):
             request.session.set_expiry(REMEMBER_ME_SECONDS)
         else:
@@ -101,14 +114,53 @@ def register_view(request):
 
 @require_POST
 def logout_view(request):
+    clear_view_as(request)
     logout(request)
     messages.info(request, 'Signed out.')
     return redirect('login')
 
 
 @login_required
+@user_passes_test(_superuser_required)
+def engineers_view(request):
+    engineers = list_engineers().annotate(
+        pending_count=Count('jobs', filter=Q(jobs__status=Job.Status.PENDING)),
+        job_count=Count('jobs'),
+    )
+    return render(
+        request,
+        'planner/engineers.html',
+        {
+            'engineers': engineers,
+        },
+    )
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def view_as_user(request, user_id: int):
+    other = set_view_as(request, user_id)
+    if other is None:
+        messages.info(request, 'Viewing your own account.')
+    else:
+        messages.info(request, f'Viewing as {other.username}.')
+    return redirect('dashboard')
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def stop_view_as(request):
+    clear_view_as(request)
+    messages.info(request, 'Back to your own account.')
+    return redirect('dashboard')
+
+
+@login_required
 def dashboard(request):
-    jobs = Job.objects.filter(user=request.user).order_by(
+    planner = active_user(request)
+    jobs = Job.objects.filter(user=planner).order_by(
         'status',
         'route_order',
         'appointment_type',
@@ -123,10 +175,10 @@ def dashboard(request):
     finished = [j for j in jobs if j.status != Job.Status.PENDING]
     display_jobs = pending_ordered + pending_rest + finished
 
-    settings = EngineerSettings.for_user(request.user)
+    settings = EngineerSettings.for_user(planner)
     planned = pending_ordered
     day_route = (
-        DayRoute.objects.filter(user=request.user).order_by('-updated_at').first()
+        DayRoute.objects.filter(user=planner).order_by('-updated_at').first()
     )
     total_miles = (
         day_route.total_miles
@@ -200,7 +252,7 @@ def dashboard(request):
             )
 
     route_geometry = day_route.geometry if day_route else []
-    next_job, next_nav_url = next_job_navigate_url(request.user)
+    next_job, next_nav_url = next_job_navigate_url(planner)
     job_rows = [
         {
             'job': job,
@@ -283,10 +335,11 @@ def place_details(request):
 @login_required
 @require_POST
 def add_job(request):
+    planner = active_user(request)
     form = JobForm(request.POST)
     if form.is_valid():
         job = form.save(commit=False)
-        job.user = request.user
+        job.user = planner
 
         place_lat = request.POST.get('place_lat', '').strip()
         place_lng = request.POST.get('place_lng', '').strip()
@@ -323,14 +376,14 @@ def add_job(request):
         job.status = Job.Status.PENDING
         job.route_order = None
         job.save()
-        DayRoute.objects.filter(user=request.user).update(order_locked=False)
-        Job.objects.filter(user=request.user, status=Job.Status.PENDING).update(
+        DayRoute.objects.filter(user=planner).update(order_locked=False)
+        Job.objects.filter(user=planner, status=Job.Status.PENDING).update(
             route_order=None,
             estimated_arrival=None,
             leg_miles_from_previous=None,
             leg_minutes_from_previous=None,
         )
-        DayRoute.objects.filter(user=request.user).delete()
+        DayRoute.objects.filter(user=planner).delete()
         return redirect('dashboard')
 
     messages.error(request, 'Could not add job — check the form.')
@@ -340,9 +393,10 @@ def add_job(request):
 @login_required
 @require_POST
 def delete_job(request, pk):
+    planner = active_user(request)
     job = _user_job(request, pk)
     job.delete()
-    plan_current_route(request.user, unlock=False)
+    plan_current_route(planner, unlock=False)
     messages.info(request, 'Job removed.')
     return redirect('dashboard')
 
@@ -350,6 +404,7 @@ def delete_job(request, pk):
 @login_required
 @require_POST
 def update_appointment(request, pk):
+    planner = active_user(request)
     job = _user_job(request, pk)
     form = AppointmentTypeForm(
         request.POST,
@@ -360,18 +415,18 @@ def update_appointment(request, pk):
         changed = form.has_changed()
         form.save()
         if changed and job.status == Job.Status.PENDING:
-            DayRoute.objects.filter(user=request.user).update(order_locked=False)
+            DayRoute.objects.filter(user=planner).update(order_locked=False)
             messages.success(
                 request,
                 f'Updated to {job.appointment_short}. Hit Plan best route to re-order.',
             )
-            Job.objects.filter(user=request.user, status=Job.Status.PENDING).update(
+            Job.objects.filter(user=planner, status=Job.Status.PENDING).update(
                 route_order=None,
                 estimated_arrival=None,
                 leg_miles_from_previous=None,
                 leg_minutes_from_previous=None,
             )
-            DayRoute.objects.filter(user=request.user).delete()
+            DayRoute.objects.filter(user=planner).delete()
         else:
             messages.info(request, 'Appointment unchanged.')
     else:
@@ -418,6 +473,7 @@ def mark_job(request, pk):
 @login_required
 @require_POST
 def reorder_jobs(request):
+    planner = active_user(request)
     raw = request.POST.get('order', '')
     try:
         ids = [int(x) for x in raw.split(',') if x.strip()]
@@ -428,13 +484,13 @@ def reorder_jobs(request):
         return JsonResponse({'ok': False, 'error': 'empty'}, status=400)
 
     owned = set(
-        Job.objects.filter(user=request.user, id__in=ids).values_list('id', flat=True)
+        Job.objects.filter(user=planner, id__in=ids).values_list('id', flat=True)
     )
     ids = [i for i in ids if i in owned]
     if not ids:
         return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
 
-    plan = apply_manual_order(request.user, ids)
+    plan = apply_manual_order(planner, ids)
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse(
             {
@@ -451,7 +507,8 @@ def reorder_jobs(request):
 @login_required
 @require_POST
 def unlock_order(request):
-    DayRoute.objects.filter(user=request.user).update(order_locked=False)
+    planner = active_user(request)
+    DayRoute.objects.filter(user=planner).update(order_locked=False)
     messages.info(request, 'Order unlocked — Plan best route to auto-optimise again.')
     return redirect('dashboard')
 
@@ -459,7 +516,8 @@ def unlock_order(request):
 @login_required
 @require_POST
 def plan_route(request):
-    plan = plan_current_route(request.user, unlock=True)
+    planner = active_user(request)
+    plan = plan_current_route(planner, unlock=True)
     for warning in plan.warnings:
         messages.warning(request, warning)
     if plan.job_count:
@@ -476,12 +534,13 @@ def plan_route(request):
 
 @login_required
 def settings_view(request):
-    settings = EngineerSettings.for_user(request.user)
+    planner = active_user(request)
+    settings = EngineerSettings.for_user(planner)
     if request.method == 'POST':
         form = SettingsForm(request.POST, instance=settings)
         if form.is_valid():
             obj = form.save(commit=False)
-            obj.user = request.user
+            obj.user = planner
             obj.start_lat = None
             obj.start_lng = None
             obj.start_display = ''
@@ -521,7 +580,8 @@ def settings_view(request):
 @login_required
 @require_POST
 def clear_route(request):
-    count = Job.objects.filter(user=request.user).count()
-    clear_current_route(request.user, clear_jobs=True)
+    planner = active_user(request)
+    count = Job.objects.filter(user=planner).count()
+    clear_current_route(planner, clear_jobs=True)
     messages.info(request, f'Route cleared ({count} job(s) removed).')
     return redirect('dashboard')
