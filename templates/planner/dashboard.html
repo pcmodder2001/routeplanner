@@ -379,17 +379,32 @@
     points.forEach(function (p) {
       const ll = [p.lat, p.lng];
       latLngs.push(ll);
-      const colour = colours[p.type] || '#333';
+      let colour = colours[p.type] || '#333';
+      let fillOpacity = 1;
+      let radius = p.type === 'START' ? 8 : 10;
+      if (p.status === 'done') {
+        colour = '#64748b';
+        fillOpacity = 0.85;
+      } else if (p.status === 'skipped') {
+        colour = '#94a3b8';
+        fillOpacity = 0.7;
+        radius = 8;
+      }
       const marker = L.circleMarker(ll, {
-        radius: p.type === 'START' ? 8 : 10,
+        radius: radius,
         color: '#fff',
         weight: 2,
         fillColor: colour,
-        fillOpacity: 1
+        fillOpacity: fillOpacity
       }).addTo(map);
-      const title = p.type === 'START'
-        ? p.label
-        : '#' + p.order + ' · ' + p.label + ' (' + p.type + ')';
+      let title;
+      if (p.type === 'START') {
+        title = p.label;
+      } else {
+        const statusBit = p.status === 'done' ? ' · Done'
+          : (p.status === 'skipped' ? ' · Skipped' : '');
+        title = '#' + (p.order || '?') + ' · ' + p.label + ' (' + p.type + ')' + statusBit;
+      }
       marker.bindPopup(title);
     });
     const path = (geometry && geometry.length > 1) ? geometry : latLngs;

@@ -203,21 +203,28 @@ def dashboard(request):
                 'lat': settings.start_lat,
                 'lng': settings.start_lng,
                 'type': 'START',
+                'status': 'start',
             }
         )
-    for job in planned:
-        if job.is_geocoded:
-            map_points.append(
-                {
-                    'order': job.route_order,
-                    'label': job.geocode_display
-                    or job.reference
-                    or job.location,
-                    'lat': job.lat,
-                    'lng': job.lng,
-                    'type': job.appointment_type,
-                }
-            )
+    # Full day on the map: done/skipped/pending in planned order
+    map_jobs = sorted(
+        [j for j in jobs if j.is_geocoded and j.route_order is not None],
+        key=lambda j: j.route_order or 0,
+    )
+    map_jobs.extend(j for j in pending_rest if j.is_geocoded)
+    for job in map_jobs:
+        map_points.append(
+            {
+                'order': job.route_order,
+                'label': job.geocode_display
+                or job.reference
+                or job.location,
+                'lat': job.lat,
+                'lng': job.lng,
+                'type': job.appointment_type,
+                'status': job.status,
+            }
+        )
 
     stops_for_maps = []
     if settings.start_lat is not None and settings.start_lng is not None:
@@ -235,21 +242,20 @@ def dashboard(request):
                 is_start=True,
             )
         )
-    for job in planned:
-        if job.is_geocoded:
-            stops_for_maps.append(
-                PlannedStop(
-                    order=job.route_order or 0,
-                    job=job,
-                    label=job.location,
-                    appointment=job.appointment_type,
-                    lat=job.lat,
-                    lng=job.lng,
-                    miles_from_previous=job.leg_miles_from_previous or 0,
-                    minutes_from_previous=job.leg_minutes_from_previous or 0,
-                    estimated_arrival=job.estimated_arrival,
-                )
+    for job in map_jobs:
+        stops_for_maps.append(
+            PlannedStop(
+                order=job.route_order or 0,
+                job=job,
+                label=job.location,
+                appointment=job.appointment_type,
+                lat=job.lat,
+                lng=job.lng,
+                miles_from_previous=job.leg_miles_from_previous or 0,
+                minutes_from_previous=job.leg_minutes_from_previous or 0,
+                estimated_arrival=job.estimated_arrival,
             )
+        )
 
     route_geometry = day_route.geometry if day_route else []
     next_job, next_nav_url = next_job_navigate_url(planner)
