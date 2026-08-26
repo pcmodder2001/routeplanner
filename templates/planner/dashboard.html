@@ -52,6 +52,7 @@
       {{ job_form.reference }}
       {{ job_form.notes }}
       <button type="submit" class="btn btn-primary btn-block">Add job</button>
+      <button type="button" class="btn btn-ghost btn-block" id="bulk-add-btn">Bulk paste jobs</button>
       {% if google_places_enabled %}
       <p class="meta">Try <code>WF16 9PF 22</code> or <code>WF12 8AJ ESSO</code>.</p>
       {% endif %}
@@ -226,6 +227,8 @@
 {% block scripts %}
 {{ map_points|json_script:"map-data" }}
 {{ route_geometry|json_script:"route-geometry" }}
+{{ route_postcodes|json_script:"route-postcodes" }}
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 (function () {
   // --- Google Places address autocomplete ---
@@ -237,6 +240,11 @@
   const lookupEnabled = {{ address_lookup_enabled|yesno:"true,false" }};
   let suggestTimer = null;
   let sessionToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+  function csrfToken() {
+    const el = document.querySelector('[name=csrfmiddlewaretoken]');
+    return el ? el.value : '';
+  }
 
   function clearPlacePick() {
     if (placeLat) placeLat.value = '';
@@ -256,6 +264,336 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  function normalisePostcode(pc) {
+    const compact = String(pc || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (compact.length < 5) return compact;
+    return compact.slice(0, -3) + ' ' + compact.slice(-3);
+  }
+
+  function extractUkPostcode(text) {
+    const re = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/gi;
+    let m;
+    let last = '';
+    while ((m = re.exec(String(text || ''))) !== null) {
+      last = m[1];
+    }
+    return last ? normalisePostcode(last) : '';
+  }
+
+  let routePostcodes = [];
+  try {
+    routePostcodes = JSON.parse(document.getElementById('route-postcodes').textContent) || [];
+  } catch (e) {
+    routePostcodes = [];
+  }
+  const routePcSet = {};
+  routePostcodes.forEach(function (pc) {
+    routePcSet[normalisePostcode(pc)] = true;
+  });
+
+  // --- Single add: warn if postcode already on route ---
+  const addForm = document.getElementById('add-job-form');
+  if (addForm && typeof Swal !== 'undefined') {
+    addForm.addEventListener('submit', function (ev) {
+      if (addForm.dataset.dupOk === '1') {
+        delete addForm.dataset.dupOk;
+        return;
+      }
+      const loc = (locationInput && locationInput.value) || '';
+      const display = (placeDisplay && placeDisplay.value) || '';
+      const pc = extractUkPostcode(loc) || extractUkPostcode(display);
+      if (!pc || !routePcSet[pc]) return;
+      ev.preventDefault();
+      Swal.fire({
+        icon: 'warning',
+        title: 'Postcode already on route',
+        text: pc + ' job already on route. Add this job anyway?',
+        showCancelButton: true,
+        confirmButtonText: 'Add anyway',
+        cancelButtonText: 'Cancel',
+        customClass: {
+          popup: 'bulk-swal',
+          confirmButton: 'btn btn-primary',
+          cancelButton: 'btn btn-ghost'
+        },
+        buttonsStyling: false
+      }).then(function (res) {
+        if (res.isConfirmed) {
+          addForm.dataset.dupOk = '1';
+          addForm.requestSubmit();
+        }
+      });
+    });
+  }
+
+  // --- Bulk paste (SweetAlert) ---
+  const bulkBtn = document.getElementById('bulk-add-btn');
+  if (bulkBtn && typeof Swal !== 'undefined') {
+    let lastBulkRaw = '';
+
+    function miniTable(jobs, cols) {
+      const rows = (jobs || []).map(function (j, i) {
+        return '<tr><td>' + (i + 1) + '</td>'
+          + cols.map(function (c) {
+            if (c === 'ref') {
+              return '<td><code>' + escapeHtml(j.reference || '—') + '</code></td>';
+            }
+            if (c === 'slot') {
+              return '<td><span class="tag tag-' + escapeHtml(j.appointment_type || '') + '">'
+                + escapeHtml(j.appointment_type || '') + '</span></td>';
+            }
+            if (c === 'loc') {
+              return '<td class="bulk-loc">' + escapeHtml(j.location || j.existing_location || '') + '</td>';
+            }
+            return '';
+          }).join('')
+          + '</tr>';
+      }).join('');
+      const heads = { ref: 'Job no', slot: 'Slot', loc: 'Address' };
+      return '<div class="bulk-table-wrap"><table class="bulk-table"><thead><tr><th>#</th>'
+        + cols.map(function (c) { return '<th>' + heads[c] + '</th>'; }).join('')
+        + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }
+
+    function reviewHtml(data) {
+      const toAdd = data.to_add || data.jobs || [];
+      const already = data.already_on || [];
+      const missing = data.missing_from_paste || [];
+      const warns = data.postcode_warnings || [];
+      let html = '';
+
+      if (warns.length) {
+        html += '<div class="bulk-warn-list">'
+          + warns.map(function (w) {
+            return '<p class="bulk-warn">' + escapeHtml(w.message || (w.postcode + ' job already on route')) + '</p>';
+          }).join('')
+          + '</div>';
+      }
+
+      if (toAdd.length) {
+        html += '<p class="bulk-lead"><strong>' + toAdd.length + '</strong> new job'
+          + (toAdd.length === 1 ? '' : 's')
+          + ' will be added:</p>'
+          + miniTable(toAdd, ['ref', 'slot', 'loc']);
+      } else {
+        html += '<p class="bulk-lead">No new jobs to add'
+          + (already.length ? ' — all pasted jobs are already on the route.' : '.')
+          + '</p>';
+      }
+
+      if (already.length) {
+        html += '<p class="bulk-meta">Skipping ' + already.length
+          + ' already on route: '
+          + already.map(function (j) { return '<code>' + escapeHtml(j.reference) + '</code>'; }).join(', ')
+          + '</p>';
+      }
+
+      if (missing.length) {
+        html += '<p class="bulk-lead bulk-remove-note">Also on your route but <strong>not</strong> in the paste '
+          + '(you will be asked whether to remove these):</p>'
+          + miniTable(missing, ['ref', 'loc']);
+      }
+
+      if (data.invalid && data.invalid.length) {
+        html += '<p class="bulk-warn">Skipped ' + data.invalid.length + ' incomplete block(s).</p>';
+      }
+      return html;
+    }
+
+    function submitBulk(jobs, removeIds) {
+      return fetch('{% url "bulk_add_confirm" %}', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken()
+        },
+        body: JSON.stringify({ jobs: jobs || [], remove_ids: removeIds || [] })
+      })
+        .then(function (r) {
+          return r.json().then(function (j) {
+            return { status: r.status, body: j };
+          });
+        })
+        .then(function (res) {
+          if (!res.body.ok) {
+            throw new Error(res.body.error || 'Could not update jobs');
+          }
+          return res.body;
+        });
+    }
+
+    function askRemoveThenSubmit(data) {
+      const toAdd = data.to_add || data.jobs || [];
+      const missing = data.missing_from_paste || [];
+
+      function finish(removeIds) {
+        Swal.fire({
+          title: 'Updating route…',
+          allowOutsideClick: false,
+          allowEscapeKey: false,
+          showConfirmButton: false,
+          didOpen: function () {
+            Swal.showLoading();
+            submitBulk(toAdd, removeIds)
+              .then(function (body) {
+                window.location.href = body.redirect || '/';
+              })
+              .catch(function (err) {
+                Swal.fire({
+                  icon: 'error',
+                  title: 'Could not update',
+                  text: (err && err.message) || 'Try again',
+                  customClass: { confirmButton: 'btn btn-primary' },
+                  buttonsStyling: false
+                });
+              });
+          }
+        });
+      }
+
+      if (!missing.length) {
+        finish([]);
+        return;
+      }
+
+      Swal.fire({
+        icon: 'question',
+        title: 'Remove jobs not in paste?',
+        html: '<p class="bulk-lead">These are on your route but were not in the pasted list. Remove them?</p>'
+          + miniTable(missing, ['ref', 'loc']),
+        width: 'min(96vw, 44rem)',
+        showDenyButton: true,
+        showCancelButton: true,
+        confirmButtonText: 'Yes, remove them',
+        denyButtonText: 'No, keep them',
+        cancelButtonText: 'Cancel',
+        customClass: {
+          popup: 'bulk-swal',
+          confirmButton: 'btn btn-accent',
+          denyButton: 'btn btn-ghost',
+          cancelButton: 'btn btn-ghost'
+        },
+        buttonsStyling: false
+      }).then(function (res) {
+        if (res.isConfirmed) {
+          finish(missing.map(function (j) { return j.id; }));
+          return;
+        }
+        if (res.isDenied) {
+          finish([]);
+          return;
+        }
+        openReview(data);
+      });
+    }
+
+    function openReview(data) {
+      const toAdd = data.to_add || data.jobs || [];
+      const missing = data.missing_from_paste || [];
+      const canProceed = toAdd.length > 0 || missing.length > 0;
+      Swal.fire({
+        title: 'Confirm bulk update',
+        html: reviewHtml(data),
+        width: 'min(96vw, 44rem)',
+        showCancelButton: true,
+        confirmButtonText: canProceed ? 'Continue' : 'OK',
+        cancelButtonText: 'Back',
+        showConfirmButton: true,
+        customClass: {
+          popup: 'bulk-swal',
+          confirmButton: 'btn btn-accent',
+          cancelButton: 'btn btn-ghost'
+        },
+        buttonsStyling: false,
+        preConfirm: function () {
+          if (!canProceed) {
+            return false;
+          }
+          return true;
+        }
+      }).then(function (confirmResult) {
+        if (confirmResult.isConfirmed && canProceed) {
+          askRemoveThenSubmit(data);
+          return;
+        }
+        if (confirmResult.dismiss === Swal.DismissReason.cancel) {
+          openPasteDialog();
+        }
+      });
+    }
+
+    function openPasteDialog() {
+      Swal.fire({
+        title: 'Bulk paste jobs',
+        html: '<p class="bulk-lead">Paste the full work pack below (Jin no, time slot, address, postcode).</p>'
+          + '<textarea id="bulk-raw" class="bulk-raw" placeholder="Jin no: …"></textarea>',
+        width: 'min(92vw, 40rem)',
+        showCancelButton: true,
+        confirmButtonText: 'Review jobs',
+        cancelButtonText: 'Cancel',
+        focusConfirm: false,
+        customClass: {
+          popup: 'bulk-swal',
+          confirmButton: 'btn btn-primary',
+          cancelButton: 'btn btn-ghost'
+        },
+        buttonsStyling: false,
+        didOpen: function () {
+          const ta = document.getElementById('bulk-raw');
+          if (ta && lastBulkRaw) ta.value = lastBulkRaw;
+        },
+        preConfirm: function () {
+          const raw = (document.getElementById('bulk-raw') || {}).value || '';
+          if (!raw.trim()) {
+            Swal.showValidationMessage('Paste the job list first');
+            return false;
+          }
+          lastBulkRaw = raw;
+          return fetch('{% url "bulk_add_preview" %}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': csrfToken()
+            },
+            body: JSON.stringify({ raw: raw })
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (!data.ok) {
+                Swal.showValidationMessage(data.error || 'Could not parse');
+                return false;
+              }
+              const toAdd = data.to_add || data.jobs || [];
+              const already = data.already_on || [];
+              const missing = data.missing_from_paste || [];
+              if (!data.parsed_count) {
+                Swal.showValidationMessage('No jobs found — check Jin no / address lines');
+                return false;
+              }
+              if (!toAdd.length && !missing.length && already.length) {
+                Swal.showValidationMessage('All pasted jobs are already on the route — nothing to change');
+                return false;
+              }
+              if (!toAdd.length && !missing.length) {
+                Swal.showValidationMessage('Nothing to add or remove');
+                return false;
+              }
+              return data;
+            })
+            .catch(function () {
+              Swal.showValidationMessage('Network error — try again');
+              return false;
+            });
+        }
+      }).then(function (result) {
+        if (!result.isConfirmed || !result.value) return;
+        openReview(result.value);
+      });
+    }
+
+    bulkBtn.addEventListener('click', openPasteDialog);
   }
 
   function forceCaps(el) {
@@ -317,6 +655,7 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'suggest-item';
+
       btn.innerHTML = '<strong>' + escapeHtml(item.main_text || item.description) + '</strong>' +
         (item.secondary_text ? '<span>' + escapeHtml(item.secondary_text) + '</span>' : '');
       btn.addEventListener('click', function () { pickSuggestion(item); });

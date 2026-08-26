@@ -1,3 +1,5 @@
+import json
+
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -11,6 +13,14 @@ from .acting import (
     clear_view_as,
     list_engineers,
     set_view_as,
+)
+from .bulk_parse import (
+    diff_bulk_against_route,
+    extract_uk_postcode,
+    find_duplicate_postcode_jobs,
+    job_postcode,
+    parse_bulk_jobs,
+    parse_time_slot,
 )
 from .forms import (
     AppointmentTypeForm,
@@ -206,12 +216,19 @@ def dashboard(request):
                 'status': 'start',
             }
         )
-    # Full day on the map: done/skipped/pending in planned order
+    # Full day on the map: planned order, then unplanned pending, then
+    # finished jobs that lost route_order (older Done/Skip cleared it).
     map_jobs = sorted(
         [j for j in jobs if j.is_geocoded and j.route_order is not None],
         key=lambda j: j.route_order or 0,
     )
     map_jobs.extend(j for j in pending_rest if j.is_geocoded)
+    seen = {j.id for j in map_jobs}
+    map_jobs.extend(
+        j
+        for j in finished
+        if j.is_geocoded and j.id not in seen
+    )
     for job in map_jobs:
         map_points.append(
             {
@@ -304,6 +321,9 @@ def dashboard(request):
         'google_places_enabled': bool(google_maps_key()),
         'getaddress_enabled': paf_lookup_enabled(),
         'address_lookup_enabled': address_lookup_enabled(),
+        'route_postcodes': sorted(
+            {pc for j in pending if (pc := job_postcode(j))}
+        ),
     }
     return render(request, 'planner/dashboard.html', context)
 
@@ -379,6 +399,17 @@ def add_job(request):
                     'Check the address/postcode.',
                 )
 
+        dup_pc, dup_jobs = find_duplicate_postcode_jobs(planner, job.location)
+        if not dup_pc and job.geocode_display:
+            dup_pc, dup_jobs = find_duplicate_postcode_jobs(
+                planner, job.geocode_display
+            )
+        if dup_pc and dup_jobs:
+            messages.warning(
+                request,
+                f'{dup_pc} job already on route.',
+            )
+
         job.status = Job.Status.PENDING
         job.route_order = None
         job.save()
@@ -395,6 +426,201 @@ def add_job(request):
     messages.error(request, 'Could not add job — check the form.')
     return redirect('dashboard')
 
+
+def _json_body(request) -> dict:
+    try:
+        return json.loads(request.body.decode('utf-8') or '{}')
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+
+
+def _job_payload(j: dict) -> dict:
+    return {
+        'reference': j.get('reference') or '',
+        'appointment_type': j.get('appointment_type') or '',
+        'location': j.get('location') or '',
+        'jin': j.get('jin') or '',
+        'postcode': j.get('postcode') or extract_uk_postcode(j.get('location') or ''),
+    }
+
+
+@login_required
+@require_POST
+def bulk_add_preview(request):
+    """Parse pasted work-pack text and diff against the current pending route."""
+    planner = active_user(request)
+    body = _json_body(request)
+    raw = body.get('raw') or request.POST.get('raw') or ''
+    parsed = parse_bulk_jobs(raw)
+    diff = diff_bulk_against_route(parsed['jobs'], planner)
+    return JsonResponse(
+        {
+            'ok': True,
+            'parsed_count': parsed['count'],
+            'count': len(diff['to_add']),
+            'jobs': [_job_payload(j) for j in diff['to_add']],
+            'to_add': [_job_payload(j) for j in diff['to_add']],
+            'already_on': [
+                {
+                    **_job_payload(j),
+                    'existing_id': j.get('existing_id'),
+                    'existing_location': j.get('existing_location') or '',
+                }
+                for j in diff['already_on']
+            ],
+            'missing_from_paste': diff['missing_from_paste'],
+            'postcode_warnings': diff['postcode_warnings'],
+            'invalid': [
+                {
+                    'jin': j.get('jin') or '',
+                    'reference': j.get('reference') or '',
+                    'errors': j.get('errors') or [],
+                }
+                for j in parsed['invalid']
+            ],
+        }
+    )
+
+
+@login_required
+@require_POST
+def bulk_add_confirm(request):
+    """Create new bulk jobs, optionally remove missing ones, geocode, and plan."""
+    planner = active_user(request)
+    body = _json_body(request)
+    items = body.get('jobs')
+    if items is None:
+        items = []
+    if not isinstance(items, list):
+        return JsonResponse({'ok': False, 'error': 'Invalid jobs list.'}, status=400)
+
+    remove_ids_raw = body.get('remove_ids') or []
+    if not isinstance(remove_ids_raw, list):
+        remove_ids_raw = []
+    remove_ids: list[int] = []
+    for rid in remove_ids_raw:
+        try:
+            remove_ids.append(int(rid))
+        except (TypeError, ValueError):
+            continue
+
+    if not items and not remove_ids:
+        return JsonResponse(
+            {'ok': False, 'error': 'Nothing to add or remove.'},
+            status=400,
+        )
+
+    removed = 0
+    if remove_ids:
+        qs = Job.objects.filter(
+            user=planner,
+            status=Job.Status.PENDING,
+            id__in=remove_ids,
+        )
+        removed = qs.count()
+        qs.delete()
+
+    allowed = {c.value for c in Job.AppointmentType}
+    created = 0
+    geocode_fail = 0
+    postcode_warnings: list[str] = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        reference = str(item.get('reference') or '').strip()[:100]
+        location = str(item.get('location') or '').strip()[:255]
+        if not location:
+            continue
+        # Skip if this reference is already pending (race / double submit)
+        if reference:
+            exists = Job.objects.filter(
+                user=planner,
+                status=Job.Status.PENDING,
+                reference__iexact=reference,
+            ).exists()
+            if exists:
+                continue
+
+        appt = str(item.get('appointment_type') or '').strip().upper()
+        if appt not in allowed:
+            appt = parse_time_slot(str(item.get('slot_raw') or appt))
+        if appt not in allowed:
+            appt = Job.AppointmentType.ALLDAY
+
+        dup_pc, dup_jobs = find_duplicate_postcode_jobs(planner, location)
+        if dup_pc and dup_jobs:
+            postcode_warnings.append(f'{dup_pc} job already on route.')
+
+        job = Job(
+            user=planner,
+            reference=reference,
+            location=location,
+            appointment_type=appt,
+            status=Job.Status.PENDING,
+            route_order=None,
+        )
+        result = geocode_location(job.location)
+        if result:
+            job.lat = result['lat']
+            job.lng = result['lng']
+            job.geocode_display = result['display'][:255]
+        else:
+            geocode_fail += 1
+        job.save()
+        created += 1
+
+    if not created and not removed:
+        return JsonResponse(
+            {
+                'ok': False,
+                'error': 'No changes made — jobs may already be on the route.',
+            },
+            status=400,
+        )
+
+    DayRoute.objects.filter(user=planner).update(order_locked=False)
+    Job.objects.filter(user=planner, status=Job.Status.PENDING).update(
+        route_order=None,
+        estimated_arrival=None,
+        leg_miles_from_previous=None,
+        leg_minutes_from_previous=None,
+    )
+    DayRoute.objects.filter(user=planner).delete()
+    plan = plan_current_route(planner, unlock=True)
+
+    parts = []
+    if created:
+        parts.append(f'Added {created} job{"s" if created != 1 else ""}')
+    if removed:
+        parts.append(f'removed {removed}')
+    msg = ' and '.join(parts) if parts else 'Route updated'
+    if plan.job_count:
+        msg += (
+            f'; planned {plan.job_count} stops'
+            f' ({plan.total_miles} mi'
+        )
+        if plan.total_minutes:
+            msg += f', {plan.total_minutes} min'
+        msg += ').'
+    else:
+        msg += '.'
+    if geocode_fail:
+        msg += f' {geocode_fail} could not be geocoded — check addresses.'
+    messages.success(request, msg)
+    for warn in postcode_warnings:
+        messages.warning(request, warn)
+    for warning in plan.warnings:
+        messages.warning(request, warning)
+
+    return JsonResponse(
+        {
+            'ok': True,
+            'created': created,
+            'removed': removed,
+            'redirect': '/',
+        }
+    )
 
 @login_required
 @require_POST
