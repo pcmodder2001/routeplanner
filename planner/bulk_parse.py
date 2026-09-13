@@ -15,6 +15,8 @@ _FIELD = {
     'slot': re.compile(r'Time\s*slot\s*:\s*(.+)', re.IGNORECASE),
     'address': re.compile(r'Address\s*:\s*(.+)', re.IGNORECASE),
     'postcode': re.compile(r'Postcode\s*:\s*(.+)', re.IGNORECASE),
+    'task_description': re.compile(r'Task\s*Description\s*:\s*(.+)', re.IGNORECASE),
+    'task_name': re.compile(r'Task\s*Name\s*:\s*(.+)', re.IGNORECASE),
 }
 
 _MAPS_NOISE = re.compile(
@@ -71,6 +73,61 @@ def parse_time_slot(raw: str) -> str:
     return Job.AppointmentType.ALLDAY
 
 
+def parse_work_type(task_description: str, task_name: str = '') -> dict[str, Any]:
+    """
+    Classify Openreach task text into a work type + pay rate.
+
+    Priority: self install → managed install → copper / OGEA / SOGEA repair.
+    """
+    blob = f'{task_description or ""} {task_name or ""}'.upper()
+    blob = blob.replace('|', ' ')
+    blob = re.sub(r'\s+', ' ', blob).strip()
+
+    if not blob:
+        return {
+            'work_type': '',
+            'work_type_label': '',
+            'rate': '',
+        }
+
+    def result(work_type: str) -> dict[str, Any]:
+        rate = Job.WORK_TYPE_RATES.get(work_type)
+        return {
+            'work_type': work_type,
+            'work_type_label': dict(Job.WorkType.choices).get(work_type, ''),
+            'rate': f'{rate:.2f}' if rate is not None else '',
+        }
+
+    if 'SELF INSTALL' in blob or 'SELF-INSTALL' in blob or 'SELFINSTALL' in blob:
+        return result(Job.WorkType.SELF_INSTALL)
+    if 'MANAGED INSTALL' in blob or 'MANAGEDINSTALL' in blob:
+        return result(Job.WorkType.MANAGED_INSTALL)
+    if 'COPPER' in blob and ('REPAIR' in blob or 'FAULT' in blob):
+        return result(Job.WorkType.COPPER_REPAIR)
+    if 'COPPER' in blob:
+        return result(Job.WorkType.COPPER_REPAIR)
+    # OGEA without a leading S (so SOGEA does not match)
+    if re.search(r'(?<!S)OGEA', blob):
+        return result(Job.WorkType.OGEA_REPAIR)
+    if 'SOGEA' in blob and ('REPAIR' in blob or 'FAULT' in blob):
+        return result(Job.WorkType.SOGEA_REPAIR)
+    if 'SOGEA' in blob and 'NEW LINE' in blob:
+        # New provide without explicit managed/self — leave blank rather than guess
+        return {
+            'work_type': '',
+            'work_type_label': '',
+            'rate': '',
+        }
+    if 'SOGEA' in blob:
+        return result(Job.WorkType.SOGEA_REPAIR)
+
+    return {
+        'work_type': '',
+        'work_type_label': '',
+        'rate': '',
+    }
+
+
 def clean_postcode(raw: str) -> str:
     text = (raw or '').strip()
     text = _MAPS_NOISE.sub('', text).strip()
@@ -105,17 +162,16 @@ def job_postcode(job: Job) -> str:
 
 def pending_route_index(user) -> dict[str, Any]:
     """
-    Index pending jobs for bulk sync / duplicate checks.
-
-    Returns:
-      jobs: list of summary dicts
-      by_ref: normalised reference → job summary
-      by_postcode: normalised postcode → [job summaries]
+    Index pending jobs for bulk sync / duplicate checks (planner day only).
     """
+    from .planner_day import planner_today
+
     jobs = list(
-        Job.objects.filter(user=user, status=Job.Status.PENDING).order_by(
-            'route_order', 'id'
-        )
+        Job.objects.filter(
+            user=user,
+            job_date=planner_today(),
+            status=Job.Status.PENDING,
+        ).order_by('route_order', 'id')
     )
     summaries = []
     by_ref: dict[str, dict[str, Any]] = {}
@@ -143,12 +199,18 @@ def pending_route_index(user) -> dict[str, Any]:
 
 
 def find_duplicate_postcode_jobs(user, location: str, *, exclude_id: int | None = None):
-    """Pending jobs that already use the same postcode as location."""
+    """Pending jobs on the planner day that already use the same postcode."""
+    from .planner_day import planner_today
+
     pc = extract_uk_postcode(location)
     if not pc:
         return pc, []
     matches = []
-    for job in Job.objects.filter(user=user, status=Job.Status.PENDING):
+    for job in Job.objects.filter(
+        user=user,
+        job_date=planner_today(),
+        status=Job.Status.PENDING,
+    ):
         if exclude_id and job.id == exclude_id:
             continue
         if job_postcode(job) == pc:
@@ -256,6 +318,9 @@ def parse_job_block(block: str) -> dict[str, Any] | None:
     address = _first_match(_FIELD['address'], block)
     postcode = clean_postcode(_first_match(_FIELD['postcode'], block))
     location = build_location(address, postcode)
+    task_description = _first_match(_FIELD['task_description'], block)
+    task_name = _first_match(_FIELD['task_name'], block)
+    work = parse_work_type(task_description, task_name)
 
     errors: list[str] = []
     if not reference:
@@ -271,6 +336,11 @@ def parse_job_block(block: str) -> dict[str, Any] | None:
         'address': address,
         'postcode': postcode,
         'location': location,
+        'task_description': task_description,
+        'task_name': task_name,
+        'work_type': work['work_type'],
+        'work_type_label': work['work_type_label'],
+        'rate': work['rate'],
         'errors': errors,
         'ok': not errors,
     }

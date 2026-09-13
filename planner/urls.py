@@ -31,4 +31,5 @@ urlpatterns = [
     path('plan/', views.plan_route, name='plan_route'),
     path('clear/', views.clear_route, name='clear_route'),
     path('settings/', views.settings_view, name='settings'),
+    path('earnings/', views.earnings_view, name='earnings'),
 ]

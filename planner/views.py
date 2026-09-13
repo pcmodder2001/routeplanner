@@ -1,3 +1,6 @@
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+
 import json
 
 from django.contrib import messages
@@ -24,6 +27,7 @@ from .bulk_parse import (
     parse_bulk_jobs,
     parse_time_slot,
 )
+from .earnings import daily_breakdown, summarise_jobs
 from .forms import (
     AppointmentTypeForm,
     JobForm,
@@ -46,6 +50,12 @@ from .geocoding import (
 )
 from .models import DayRoute, EngineerSettings, Job, VanKitItem
 from .osrm import active_routing_label
+from .planner_day import (
+    format_planner_day,
+    is_rolled_to_tomorrow,
+    planner_today,
+    week_bounds,
+)
 from .routing import (
     PlannedStop,
     apply_manual_order,
@@ -175,7 +185,8 @@ def stop_view_as(request):
 @login_required
 def dashboard(request):
     planner = active_user(request)
-    jobs = Job.objects.filter(user=planner).order_by(
+    day = planner_today()
+    jobs = Job.objects.filter(user=planner, job_date=day).order_by(
         'status',
         'route_order',
         'appointment_type',
@@ -192,9 +203,8 @@ def dashboard(request):
 
     settings = EngineerSettings.for_user(planner)
     planned = pending_ordered
-    day_route = (
-        DayRoute.objects.filter(user=planner).order_by('-updated_at').first()
-    )
+    day_route = DayRoute.objects.filter(user=planner, job_date=day).first()
+    earnings = summarise_jobs(jobs)
     total_miles = (
         day_route.total_miles
         if day_route
@@ -329,6 +339,10 @@ def dashboard(request):
         'route_postcodes': sorted(
             {pc for j in pending if (pc := job_postcode(j))}
         ),
+        'planner_day': day,
+        'planner_day_label': format_planner_day(day),
+        'planner_rolled': is_rolled_to_tomorrow(),
+        'earnings': earnings,
     }
     return render(request, 'planner/dashboard.html', context)
 
@@ -417,15 +431,20 @@ def add_job(request):
 
         job.status = Job.Status.PENDING
         job.route_order = None
+        job.job_date = planner_today()
         job.save()
-        DayRoute.objects.filter(user=planner).update(order_locked=False)
-        Job.objects.filter(user=planner, status=Job.Status.PENDING).update(
+        DayRoute.objects.filter(user=planner, job_date=job.job_date).update(
+            order_locked=False
+        )
+        Job.objects.filter(
+            user=planner, job_date=job.job_date, status=Job.Status.PENDING
+        ).update(
             route_order=None,
             estimated_arrival=None,
             leg_miles_from_previous=None,
             leg_minutes_from_previous=None,
         )
-        DayRoute.objects.filter(user=planner).delete()
+        DayRoute.objects.filter(user=planner, job_date=job.job_date).delete()
         return redirect('dashboard')
 
     messages.error(request, 'Could not add job — check the form.')
@@ -446,6 +465,9 @@ def _job_payload(j: dict) -> dict:
         'location': j.get('location') or '',
         'jin': j.get('jin') or '',
         'postcode': j.get('postcode') or extract_uk_postcode(j.get('location') or ''),
+        'work_type': j.get('work_type') or '',
+        'work_type_label': j.get('work_type_label') or '',
+        'rate': j.get('rate') or '',
     }
 
 
@@ -516,9 +538,11 @@ def bulk_add_confirm(request):
         )
 
     removed = 0
+    day = planner_today()
     if remove_ids:
         qs = Job.objects.filter(
             user=planner,
+            job_date=day,
             status=Job.Status.PENDING,
             id__in=remove_ids,
         )
@@ -541,6 +565,7 @@ def bulk_add_confirm(request):
         if reference:
             exists = Job.objects.filter(
                 user=planner,
+                job_date=day,
                 status=Job.Status.PENDING,
                 reference__iexact=reference,
             ).exists()
@@ -557,11 +582,18 @@ def bulk_add_confirm(request):
         if dup_pc and dup_jobs:
             postcode_warnings.append(f'{dup_pc} job already on route.')
 
+        allowed_work = {c.value for c in Job.WorkType}
+        work_type = str(item.get('work_type') or '').strip()
+        if work_type not in allowed_work:
+            work_type = ''
+
         job = Job(
             user=planner,
             reference=reference,
             location=location,
             appointment_type=appt,
+            work_type=work_type,
+            job_date=day,
             status=Job.Status.PENDING,
             route_order=None,
         )
@@ -584,14 +616,16 @@ def bulk_add_confirm(request):
             status=400,
         )
 
-    DayRoute.objects.filter(user=planner).update(order_locked=False)
-    Job.objects.filter(user=planner, status=Job.Status.PENDING).update(
+    DayRoute.objects.filter(user=planner, job_date=day).update(order_locked=False)
+    Job.objects.filter(
+        user=planner, job_date=day, status=Job.Status.PENDING
+    ).update(
         route_order=None,
         estimated_arrival=None,
         leg_miles_from_previous=None,
         leg_minutes_from_previous=None,
     )
-    DayRoute.objects.filter(user=planner).delete()
+    DayRoute.objects.filter(user=planner, job_date=day).delete()
     plan = plan_current_route(planner, unlock=True)
 
     parts = []
@@ -652,18 +686,23 @@ def update_appointment(request, pk):
         changed = form.has_changed()
         form.save()
         if changed and job.status == Job.Status.PENDING:
-            DayRoute.objects.filter(user=planner).update(order_locked=False)
+            day = job.job_date or planner_today()
+            DayRoute.objects.filter(user=planner, job_date=day).update(
+                order_locked=False
+            )
             messages.success(
                 request,
                 f'Updated to {job.appointment_short}. Hit Plan best route to re-order.',
             )
-            Job.objects.filter(user=planner, status=Job.Status.PENDING).update(
+            Job.objects.filter(
+                user=planner, job_date=day, status=Job.Status.PENDING
+            ).update(
                 route_order=None,
                 estimated_arrival=None,
                 leg_miles_from_previous=None,
                 leg_minutes_from_previous=None,
             )
-            DayRoute.objects.filter(user=planner).delete()
+            DayRoute.objects.filter(user=planner, job_date=day).delete()
         else:
             messages.info(request, 'Appointment unchanged.')
     else:
@@ -693,9 +732,17 @@ def update_notes(request, pk):
 def mark_job(request, pk):
     job = _user_job(request, pk)
     action = request.POST.get('action', '')
-    if action == 'done':
+    if action in ('done', 'complete'):
         set_job_status(job, Job.Status.DONE)
-        messages.success(request, f'Marked done: {job.geocode_display or job.location}')
+        messages.success(
+            request, f'Completed: {job.geocode_display or job.location}'
+        )
+    elif action == 'fail':
+        set_job_status(job, Job.Status.FAILED)
+        messages.info(
+            request,
+            f'Failed: {job.geocode_display or job.location} — £0 on earnings',
+        )
     elif action == 'skip':
         set_job_status(job, Job.Status.SKIPPED)
         messages.info(request, f'Skipped: {job.geocode_display or job.location}')
@@ -745,7 +792,9 @@ def reorder_jobs(request):
 @require_POST
 def unlock_order(request):
     planner = active_user(request)
-    DayRoute.objects.filter(user=planner).update(order_locked=False)
+    DayRoute.objects.filter(user=planner, job_date=planner_today()).update(
+        order_locked=False
+    )
     messages.info(request, 'Order unlocked — Plan best route to auto-optimise again.')
     return redirect('dashboard')
 
@@ -818,10 +867,82 @@ def settings_view(request):
 @require_POST
 def clear_route(request):
     planner = active_user(request)
-    count = Job.objects.filter(user=planner).count()
+    day = planner_today()
+    count = Job.objects.filter(user=planner, job_date=day).count()
     clear_current_route(planner, clear_jobs=True)
     messages.info(request, f'Route cleared ({count} job(s) removed).')
     return redirect('dashboard')
+
+
+def _parse_iso_date(raw: str) -> date | None:
+    raw = (raw or '').strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+@login_required
+def earnings_view(request):
+    """Weekly / custom-range earnings for the active engineer."""
+    planner = active_user(request)
+    today = planner_today()
+
+    range_from = _parse_iso_date(request.GET.get('from', ''))
+    range_to = _parse_iso_date(request.GET.get('to', ''))
+    week_offset = request.GET.get('week')
+
+    mode = 'week'
+    if range_from and range_to:
+        if range_to < range_from:
+            range_from, range_to = range_to, range_from
+        start, end = range_from, range_to
+        mode = 'range'
+        week_start, week_end = week_bounds(today)
+        prev_offset = -1
+        next_offset = 1
+        current_offset = 0
+    else:
+        try:
+            current_offset = int(week_offset) if week_offset not in (None, '') else 0
+        except ValueError:
+            current_offset = 0
+        week_start, week_end = week_bounds(today)
+        start = week_start + timedelta(weeks=current_offset)
+        end = week_end + timedelta(weeks=current_offset)
+        prev_offset = current_offset - 1
+        next_offset = current_offset + 1
+        range_from = start
+        range_to = end
+
+    days = daily_breakdown(planner, start, end)
+    totals = summarise_jobs(
+        Job.objects.filter(
+            user=planner,
+            job_date__gte=start,
+            job_date__lte=end,
+        ).exclude(status=Job.Status.SKIPPED)
+    )
+
+    return render(
+        request,
+        'planner/earnings.html',
+        {
+            'mode': mode,
+            'start': start,
+            'end': end,
+            'range_from': range_from,
+            'range_to': range_to,
+            'days': days,
+            'totals': totals,
+            'prev_offset': prev_offset,
+            'next_offset': next_offset,
+            'current_offset': current_offset,
+            'planner_day_label': format_planner_day(today),
+        },
+    )
 
 
 def _van_kit_redirect(filter_key: str = 'todo'):

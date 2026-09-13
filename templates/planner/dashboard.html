@@ -7,8 +7,26 @@
   <div>
     <h1>Today's route</h1>
     <p class="lede">
-      AM first, PM after. Use ↑↓ or the handle to reorder. Tap Copy for job numbers.
+      {{ planner_day_label }}
+      {% if planner_rolled %}<span class="pill">After 9pm · tomorrow's jobs</span>{% endif %}
     </p>
+  </div>
+  <div class="earnings-strip">
+    <div class="earn-stat">
+      <span class="earn-label">Projected</span>
+      <strong>{{ earnings.projected_display }}</strong>
+    </div>
+    <div class="earn-stat">
+      <span class="earn-label">Earned</span>
+      <strong class="earn-ok">{{ earnings.earned_display }}</strong>
+    </div>
+    {% if earnings.failed_count %}
+    <div class="earn-stat">
+      <span class="earn-label">Failed</span>
+      <strong class="earn-fail">−{{ earnings.forfeited_display }}</strong>
+    </div>
+    {% endif %}
+    <a class="btn btn-ghost btn-tiny" href="{% url 'earnings' %}">Weekly</a>
   </div>
 </section>
 
@@ -115,6 +133,8 @@
           {% if job.route_order %}
             {% if job.status == 'done' %}
             <span class="order-num done" title="Was stop {{ job.route_order }}">{{ job.route_order }}</span>
+            {% elif job.status == 'failed' %}
+            <span class="order-num skipped" title="Failed stop {{ job.route_order }}">{{ job.route_order }}</span>
             {% elif job.status == 'skipped' %}
             <span class="order-num skipped" title="Was stop {{ job.route_order }}">{{ job.route_order }}</span>
             {% else %}
@@ -122,6 +142,8 @@
             {% endif %}
           {% elif job.status == 'done' %}
           <span class="order-num done">✓</span>
+          {% elif job.status == 'failed' %}
+          <span class="order-num skipped">✕</span>
           {% elif job.status == 'skipped' %}
           <span class="order-num skipped">–</span>
           {% else %}
@@ -143,8 +165,19 @@
                     data-copy="{% if job.geocode_display %}{{ job.geocode_display }}{% else %}{{ job.location }}{% endif %}"
                     aria-label="Copy address">Copy</button>
             <span class="tag tag-{{ job.appointment_type }}">{{ job.appointment_short }}</span>
+            {% if job.work_type %}
+            <span class="tag tag-work tag-{{ job.work_type }} {% if job.status == 'failed' %}is-failed-rate{% endif %}">
+              {{ job.work_type_label }}
+              {% if job.status == 'failed' %}
+              · <span class="rate-strike">{{ job.work_rate_display }}</span>
+              <span class="rate-zero">£0.00</span>
+              {% elif job.work_rate_display %}
+              · {{ job.work_rate_display }}
+              {% endif %}
+            </span>
+            {% endif %}
             {% if job.status != 'pending' %}
-            <span class="tag tag-status">{{ job.get_status_display }}</span>
+            <span class="tag tag-status tag-status-{{ job.status }}">{{ job.get_status_display }}</span>
             {% endif %}
           </div>
           {% if job.geocode_display and job.location|upper != job.geocode_display|upper %}
@@ -168,8 +201,13 @@
           <div class="job-toolbar">
             <form method="post" action="{% url 'mark_job' job.pk %}">
               {% csrf_token %}
-              <input type="hidden" name="action" value="done">
-              <button type="submit" class="btn btn-tiny btn-done">Done</button>
+              <input type="hidden" name="action" value="complete">
+              <button type="submit" class="btn btn-tiny btn-done">Complete</button>
+            </form>
+            <form method="post" action="{% url 'mark_job' job.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="fail">
+              <button type="submit" class="btn btn-tiny btn-fail">Fail</button>
             </form>
             <form method="post" action="{% url 'mark_job' job.pk %}">
               {% csrf_token %}
@@ -344,6 +382,11 @@
               return '<td><span class="tag tag-' + escapeHtml(j.appointment_type || '') + '">'
                 + escapeHtml(j.appointment_type || '') + '</span></td>';
             }
+            if (c === 'type') {
+              const label = j.work_type_label || '—';
+              const rate = j.rate ? (' · £' + escapeHtml(j.rate)) : '';
+              return '<td>' + escapeHtml(label) + rate + '</td>';
+            }
             if (c === 'loc') {
               return '<td class="bulk-loc">' + escapeHtml(j.location || j.existing_location || '') + '</td>';
             }
@@ -351,7 +394,7 @@
           }).join('')
           + '</tr>';
       }).join('');
-      const heads = { ref: 'Job no', slot: 'Slot', loc: 'Address' };
+      const heads = { ref: 'Job no', slot: 'Slot', type: 'Type', loc: 'Address' };
       return '<div class="bulk-table-wrap"><table class="bulk-table"><thead><tr><th>#</th>'
         + cols.map(function (c) { return '<th>' + heads[c] + '</th>'; }).join('')
         + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
@@ -376,7 +419,7 @@
         html += '<p class="bulk-lead"><strong>' + toAdd.length + '</strong> new job'
           + (toAdd.length === 1 ? '' : 's')
           + ' will be added:</p>'
-          + miniTable(toAdd, ['ref', 'slot', 'loc']);
+          + miniTable(toAdd, ['ref', 'slot', 'type', 'loc']);
       } else {
         html += '<p class="bulk-lead">No new jobs to add'
           + (already.length ? ' — all pasted jobs are already on the route.' : '.')
@@ -737,6 +780,10 @@
       if (p.status === 'done') {
         colour = '#64748b';
         fillOpacity = 0.85;
+      } else if (p.status === 'failed') {
+        colour = '#b91c1c';
+        fillOpacity = 0.75;
+        radius = 8;
       } else if (p.status === 'skipped') {
         colour = '#94a3b8';
         fillOpacity = 0.7;
@@ -753,8 +800,9 @@
       if (p.type === 'START') {
         title = p.label;
       } else {
-        const statusBit = p.status === 'done' ? ' · Done'
-          : (p.status === 'skipped' ? ' · Skipped' : '');
+        const statusBit = p.status === 'done' ? ' · Complete'
+          : (p.status === 'failed' ? ' · Failed'
+          : (p.status === 'skipped' ? ' · Skipped' : ''));
         title = '#' + (p.order || '?') + ' · ' + p.label + ' (' + p.type + ')' + statusBit;
       }
       marker.bindPopup(title);

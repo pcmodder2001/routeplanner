@@ -11,12 +11,13 @@ class JobAdmin(admin.ModelAdmin):
         'reference',
         'location',
         'appointment_type',
+        'work_type',
         'status',
         'route_order',
         'estimated_arrival',
         'leg_minutes_from_previous',
     )
-    list_filter = ('user', 'job_date', 'appointment_type', 'status')
+    list_filter = ('user', 'job_date', 'appointment_type', 'work_type', 'status')
     search_fields = ('location', 'reference', 'notes', 'user__username')
     raw_id_fields = ('user',)
 

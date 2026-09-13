@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Earnings · Route Planner{% endblock %}
+
+{% block content %}
+<section class="hero-bar">
+  <div>
+    <h1>Earnings</h1>
+    <p class="lede">
+      {% if mode == 'range' %}
+      {{ start|date:"d M Y" }} – {{ end|date:"d M Y" }}
+      {% else %}
+      Week of {{ start|date:"d M Y" }}
+      {% endif %}
+    </p>
+  </div>
+  <div class="earnings-strip">
+    <div class="earn-stat">
+      <span class="earn-label">Projected</span>
+      <strong>{{ totals.projected_display }}</strong>
+    </div>
+    <div class="earn-stat">
+      <span class="earn-label">Earned</span>
+      <strong class="earn-ok">{{ totals.earned_display }}</strong>
+    </div>
+    {% if totals.failed_count %}
+    <div class="earn-stat">
+      <span class="earn-label">Failed</span>
+      <strong class="earn-fail">−{{ totals.forfeited_display }}</strong>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<div class="panel earnings-controls">
+  <div class="week-nav">
+    <a class="btn btn-ghost btn-tiny" href="{% url 'earnings' %}?week={{ prev_offset }}">← Prev week</a>
+    <a class="btn btn-ghost btn-tiny" href="{% url 'earnings' %}">This week</a>
+    <a class="btn btn-ghost btn-tiny" href="{% url 'earnings' %}?week={{ next_offset }}">Next week →</a>
+  </div>
+  <form method="get" action="{% url 'earnings' %}" class="range-form">
+    <label>
+      From
+      <input class="input input-compact" type="date" name="from" value="{{ range_from|date:'Y-m-d' }}">
+    </label>
+    <label>
+      To
+      <input class="input input-compact" type="date" name="to" value="{{ range_to|date:'Y-m-d' }}">
+    </label>
+    <button type="submit" class="btn btn-primary btn-tiny">Show range</button>
+  </form>
+</div>
+
+{% if days %}
+{% for day in days %}
+<div class="panel earnings-day">
+  <div class="earnings-day-head">
+    <h2>{{ day.date|date:"D j M Y" }}</h2>
+    <div class="earnings-day-totals">
+      <span>Projected {{ day.projected_display }}</span>
+      <span class="earn-ok">Earned {{ day.earned_display }}</span>
+      {% if day.failed_count %}
+      <span class="earn-fail">Failed −{{ day.forfeited_display }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <table class="earnings-table">
+    <thead>
+      <tr>
+        <th>Ref</th>
+        <th>Address</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th>Rate</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in day.jobs %}
+      <tr class="status-{{ job.status }}">
+        <td><code>{{ job.reference|default:"—" }}</code></td>
+        <td>{{ job.geocode_display|default:job.location }}</td>
+        <td>{{ job.work_type_label|default:"—" }}</td>
+        <td>{{ job.get_status_display }}</td>
+        <td>
+          {% if job.status == 'failed' %}
+          <span class="rate-strike">{{ job.work_rate_display }}</span>
+          <span class="rate-zero">£0.00</span>
+          {% elif job.work_rate_display %}
+          {{ job.work_rate_display }}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+{% else %}
+<div class="empty panel">
+  <p>No jobs in this period.</p>
+</div>
+{% endif %}
+{% endblock %}

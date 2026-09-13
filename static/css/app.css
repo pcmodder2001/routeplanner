@@ -446,6 +446,13 @@ a { color: var(--primary); }
 .tag-PM { background: #fde8d2; color: var(--pm); }
 .tag-ALLDAY { background: #e8eefc; color: var(--allday); }
 
+.tag-work { font-weight: 600; }
+.tag-managed_install { background: #e0e7ff; color: #3730a3; }
+.tag-self_install { background: #f3e8ff; color: #6b21a8; }
+.tag-sogea_repair,
+.tag-ogea_repair,
+.tag-copper_repair { background: #ffe4e6; color: #9f1239; }
+
 .meta, .meta-row, .notes {
   color: var(--muted);
   font-size: 0.88rem;
@@ -510,6 +517,162 @@ a { color: var(--primary); }
   background: var(--am);
   color: #fff;
   border-color: var(--am);
+}
+
+.btn-fail {
+  background: #fff;
+  color: var(--danger);
+  border-color: #f0c4c4;
+}
+
+.btn-fail:hover {
+  background: #fef2f2;
+  border-color: var(--danger);
+}
+
+.rate-strike {
+  text-decoration: line-through;
+  opacity: 0.65;
+  margin-right: 0.25rem;
+}
+
+.rate-zero {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.tag-status-failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.tag-status-done {
+  background: #d9f2e8;
+  color: var(--am);
+}
+
+.job-card.status-failed {
+  opacity: 0.92;
+}
+
+.earnings-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.earn-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 4.5rem;
+}
+
+.earn-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.earn-stat strong {
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.earn-ok { color: var(--am); }
+.earn-fail { color: var(--danger); }
+
+.earnings-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.week-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.range-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+.range-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.earnings-day {
+  margin-bottom: 0.85rem;
+  padding: 0;
+  overflow: hidden;
+}
+
+.earnings-day-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  background: #e8eee6;
+  border-bottom: 1px solid var(--line);
+}
+
+.earnings-day-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.earnings-day-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.earnings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.earnings-table th,
+.earnings-table td {
+  padding: 0.55rem 0.85rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.earnings-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: #f3f7f1;
+}
+
+.earnings-table tr.status-failed td {
+  background: #fff5f5;
+}
+
+.earnings-table tr:last-child td {
+  border-bottom: none;
 }
 
 .next-bar {

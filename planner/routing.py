@@ -20,6 +20,7 @@ from django.utils import timezone
 from .geocoding import geocode_location
 from .models import DayRoute, EngineerSettings, Job
 from .osrm import fetch_road_matrices, fetch_road_path
+from .planner_day import planner_today
 
 EARTH_RADIUS_MILES = 3958.8
 # Approximate road factor vs straight-line distance for UK local driving
@@ -376,8 +377,9 @@ def ensure_start_geocoded(settings: EngineerSettings) -> str | None:
 
 
 def clear_current_route(user, *, clear_jobs: bool = False) -> None:
-    """Reset planned order/geometry for this user. Optionally wipe all their jobs."""
-    jobs = Job.objects.filter(user=user)
+    """Reset planned order/geometry for this user's planner day."""
+    route_date = planner_today()
+    jobs = Job.objects.filter(user=user, job_date=route_date)
     if clear_jobs:
         jobs.delete()
     else:
@@ -387,11 +389,11 @@ def clear_current_route(user, *, clear_jobs: bool = False) -> None:
             leg_miles_from_previous=None,
             leg_minutes_from_previous=None,
         )
-    DayRoute.objects.filter(user=user).delete()
+    DayRoute.objects.filter(user=user, job_date=route_date).delete()
 
 
 def get_or_create_day_route(user) -> DayRoute:
-    route_date = timezone.localdate()
+    route_date = planner_today()
     obj, _ = DayRoute.objects.get_or_create(user=user, job_date=route_date)
     return obj
 
@@ -433,8 +435,10 @@ def _persist_ordered_jobs(
     order_locked: bool,
     warnings: list[str],
 ) -> RoutePlan:
-    # Clear route fields on pending jobs first
-    Job.objects.filter(user=user, status=Job.Status.PENDING).update(
+    # Clear route fields on pending jobs for this day first
+    Job.objects.filter(
+        user=user, job_date=route_date, status=Job.Status.PENDING
+    ).update(
         route_order=None,
         estimated_arrival=None,
         leg_miles_from_previous=None,
@@ -534,16 +538,16 @@ def _persist_ordered_jobs(
 
 
 def plan_current_route(user, *, unlock: bool = True) -> RoutePlan:
-    """Optimise pending jobs (AM/PM/all-day). Ignores done/skipped."""
+    """Optimise pending jobs (AM/PM/all-day). Ignores done/skipped/failed."""
     settings = EngineerSettings.for_user(user)
     warnings: list[str] = []
-    route_date = timezone.localdate()
+    route_date = planner_today()
 
     start_warning = ensure_start_geocoded(settings)
     if start_warning:
         warnings.append(start_warning)
 
-    all_jobs = list(Job.objects.filter(user=user))
+    all_jobs = list(Job.objects.filter(user=user, job_date=route_date))
     warnings.extend(ensure_geocoded(all_jobs))
 
     pending = [
@@ -553,7 +557,9 @@ def plan_current_route(user, *, unlock: bool = True) -> RoutePlan:
     ]
     if not pending:
         DayRoute.objects.filter(user=user, job_date=route_date).delete()
-        Job.objects.filter(user=user, status=Job.Status.PENDING).update(
+        Job.objects.filter(
+            user=user, job_date=route_date, status=Job.Status.PENDING
+        ).update(
             route_order=None,
             estimated_arrival=None,
             leg_miles_from_previous=None,
@@ -575,7 +581,12 @@ def plan_current_route(user, *, unlock: bool = True) -> RoutePlan:
     start = resolve_start_point(settings, pending)
     # If some jobs are done, start routing remaining from last completed stop
     last_done = (
-        Job.objects.filter(user=user, status=Job.Status.DONE, lat__isnull=False)
+        Job.objects.filter(
+            user=user,
+            job_date=route_date,
+            status=Job.Status.DONE,
+            lat__isnull=False,
+        )
         .order_by('-route_order', '-id')
         .first()
     )
@@ -679,14 +690,17 @@ def apply_manual_order(user, job_ids: Sequence[int]) -> RoutePlan:
     """Lock route to the given pending job id order and recompute times/path."""
     settings = EngineerSettings.for_user(user)
     warnings: list[str] = []
-    route_date = timezone.localdate()
+    route_date = planner_today()
 
     start_warning = ensure_start_geocoded(settings)
     if start_warning:
         warnings.append(start_warning)
 
     pending_qs = Job.objects.filter(
-        user=user, status=Job.Status.PENDING, id__in=job_ids
+        user=user,
+        job_date=route_date,
+        status=Job.Status.PENDING,
+        id__in=job_ids,
     )
     by_id = {j.id: j for j in pending_qs}
     ordered_jobs = [by_id[i] for i in job_ids if i in by_id]
@@ -705,7 +719,12 @@ def apply_manual_order(user, job_ids: Sequence[int]) -> RoutePlan:
 
     start = resolve_start_point(settings, ordered_jobs)
     last_done = (
-        Job.objects.filter(user=user, status=Job.Status.DONE, lat__isnull=False)
+        Job.objects.filter(
+            user=user,
+            job_date=route_date,
+            status=Job.Status.DONE,
+            lat__isnull=False,
+        )
         .order_by('-id')
         .first()
     )
@@ -767,8 +786,14 @@ def set_job_status(job: Job, status: str, *, replan: bool = False) -> RoutePlan 
 def next_job_navigate_url(user) -> tuple[Job | None, str]:
     """One-tap Google Maps directions to the next pending stop only."""
     settings = EngineerSettings.for_user(user)
+    route_date = planner_today()
     nxt = (
-        Job.objects.filter(user=user, status=Job.Status.PENDING, lat__isnull=False)
+        Job.objects.filter(
+            user=user,
+            job_date=route_date,
+            status=Job.Status.PENDING,
+            lat__isnull=False,
+        )
         .order_by('route_order', 'id')
         .first()
     )
@@ -778,7 +803,12 @@ def next_job_navigate_url(user) -> tuple[Job | None, str]:
     origin_lat = settings.start_lat
     origin_lng = settings.start_lng
     last_done = (
-        Job.objects.filter(user=user, status=Job.Status.DONE, lat__isnull=False)
+        Job.objects.filter(
+            user=user,
+            job_date=route_date,
+            status=Job.Status.DONE,
+            lat__isnull=False,
+        )
         .order_by('-route_order', '-id')
         .first()
     )

@@ -7,6 +7,7 @@ from planner.bulk_parse import (
     normalise_postcode,
     parse_bulk_jobs,
     parse_time_slot,
+    parse_work_type,
 )
 from planner.models import Job
 
@@ -110,6 +111,38 @@ class BulkParseTests(SimpleTestCase):
         self.assertEqual(a['reference'], 'MY5699295')
         self.assertEqual(a['appointment_type'], Job.AppointmentType.PM)
         self.assertIn('HX7 8QU', a['location'])
+        self.assertEqual(a['work_type'], Job.WorkType.SOGEA_REPAIR)
+        self.assertEqual(a['rate'], '30.00')
         self.assertEqual(b['reference'], '28745131A')
         self.assertEqual(b['appointment_type'], Job.AppointmentType.PM)
         self.assertIn('OULTON TERRACE', b['location'])
+        self.assertEqual(b['work_type'], Job.WorkType.MANAGED_INSTALL)
+        self.assertEqual(b['rate'], '22.50')
+
+    def test_work_types(self):
+        self.assertEqual(
+            parse_work_type('SOGEA repair l Fault at customer end')['work_type'],
+            Job.WorkType.SOGEA_REPAIR,
+        )
+        self.assertEqual(
+            parse_work_type(
+                'SOGEA new line provide | Jumpersrequired | Managed install | Standard'
+            )['work_type'],
+            Job.WorkType.MANAGED_INSTALL,
+        )
+        self.assertEqual(
+            parse_work_type('OGEA repair at PCP')['work_type'],
+            Job.WorkType.OGEA_REPAIR,
+        )
+        self.assertEqual(
+            parse_work_type('Copper repair underground')['work_type'],
+            Job.WorkType.COPPER_REPAIR,
+        )
+        self.assertEqual(
+            parse_work_type('SOGEA self install')['work_type'],
+            Job.WorkType.SELF_INSTALL,
+        )
+        self.assertEqual(
+            parse_work_type('SOGEA self install')['rate'],
+            '11.50',
+        )

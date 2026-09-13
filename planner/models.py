@@ -1,6 +1,9 @@
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+from decimal import Decimal
+
+from .planner_day import planner_today
 
 
 class EngineerSettings(models.Model):
@@ -55,8 +58,24 @@ class Job(models.Model):
 
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'
-        DONE = 'done', 'Done'
+        DONE = 'done', 'Complete'
+        FAILED = 'failed', 'Failed'
         SKIPPED = 'skipped', 'Skipped'
+
+    class WorkType(models.TextChoices):
+        MANAGED_INSTALL = 'managed_install', 'Managed install'
+        SELF_INSTALL = 'self_install', 'Self install'
+        SOGEA_REPAIR = 'sogea_repair', 'SOGEA repair'
+        OGEA_REPAIR = 'ogea_repair', 'OGEA repair'
+        COPPER_REPAIR = 'copper_repair', 'Copper repair'
+
+    WORK_TYPE_RATES = {
+        WorkType.MANAGED_INSTALL: Decimal('22.50'),
+        WorkType.SELF_INSTALL: Decimal('11.50'),
+        WorkType.SOGEA_REPAIR: Decimal('30.00'),
+        WorkType.OGEA_REPAIR: Decimal('30.00'),
+        WorkType.COPPER_REPAIR: Decimal('30.00'),
+    }
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -65,7 +84,10 @@ class Job(models.Model):
         null=True,
         blank=True,
     )
-    job_date = models.DateField(default=timezone.localdate)
+    job_date = models.DateField(
+        default=planner_today,
+        help_text='Planning day (rolls to tomorrow after 9pm local)',
+    )
     reference = models.CharField(
         max_length=100,
         blank=True,
@@ -79,6 +101,13 @@ class Job(models.Model):
         max_length=10,
         choices=AppointmentType.choices,
         default=AppointmentType.ALLDAY,
+    )
+    work_type = models.CharField(
+        max_length=20,
+        choices=WorkType.choices,
+        blank=True,
+        default='',
+        help_text='Parsed from task description on bulk import',
     )
     status = models.CharField(
         max_length=10,
@@ -121,6 +150,40 @@ class Job(models.Model):
             self.AppointmentType.PM: 'PM',
             self.AppointmentType.ALLDAY: 'All day',
         }.get(self.appointment_type, self.appointment_type)
+
+    @property
+    def work_type_label(self):
+        if not self.work_type:
+            return ''
+        return self.get_work_type_display()
+
+    @property
+    def work_rate(self) -> Decimal | None:
+        if not self.work_type:
+            return None
+        return self.WORK_TYPE_RATES.get(self.work_type)
+
+    @property
+    def work_rate_display(self) -> str:
+        rate = self.work_rate
+        if rate is None:
+            return ''
+        return f'£{rate:.2f}'
+
+    @property
+    def earns_rate(self) -> bool:
+        """False when failed/skipped — show £0 / strike through."""
+        return self.status not in (self.Status.FAILED, self.Status.SKIPPED)
+
+    @property
+    def effective_rate_display(self) -> str:
+        if not self.work_type:
+            return ''
+        if self.status == self.Status.FAILED:
+            return '£0.00'
+        if self.status == self.Status.SKIPPED:
+            return ''
+        return self.work_rate_display
 
 
 class DayRoute(models.Model):
