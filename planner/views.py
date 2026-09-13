@@ -6,6 +6,8 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .acting import (
@@ -29,6 +31,9 @@ from .forms import (
     LoginForm,
     RegisterForm,
     SettingsForm,
+    VanKitBulkForm,
+    VanKitItemForm,
+    VanKitScanForm,
 )
 from .geocoding import (
     address_autocomplete,
@@ -39,7 +44,7 @@ from .geocoding import (
     google_place_details,
     paf_lookup_enabled,
 )
-from .models import DayRoute, EngineerSettings, Job
+from .models import DayRoute, EngineerSettings, Job, VanKitItem
 from .osrm import active_routing_label
 from .routing import (
     PlannedStop,
@@ -817,3 +822,188 @@ def clear_route(request):
     clear_current_route(planner, clear_jobs=True)
     messages.info(request, f'Route cleared ({count} job(s) removed).')
     return redirect('dashboard')
+
+
+def _van_kit_redirect(filter_key: str = 'todo'):
+    if filter_key not in ('todo', 'ordered', 'all'):
+        filter_key = 'todo'
+    return redirect(f'{reverse("van_kit")}?filter={filter_key}')
+
+
+def _parse_van_kit_bulk_line(line: str) -> tuple[str, str] | None:
+    """Return (code, name) from 'CODE | Name' or 'CODE - Name'."""
+    text = (line or '').strip()
+    if not text or text.startswith('#'):
+        return None
+    for sep in ('|', '\t', ' - ', ' – '):
+        if sep in text:
+            left, right = text.split(sep, 1)
+            code = VanKitItem.normalise_code(left)
+            name = right.strip()
+            if code and name:
+                return code, name
+            break
+    parts = text.split(None, 1)
+    if len(parts) == 2:
+        code = VanKitItem.normalise_code(parts[0])
+        name = parts[1].strip()
+        if code and name:
+            return code, name
+    return None
+
+
+@login_required
+@user_passes_test(_superuser_required)
+def van_kit(request):
+    filter_key = (request.GET.get('filter') or 'todo').strip().lower()
+    if filter_key not in ('todo', 'ordered', 'all'):
+        filter_key = 'todo'
+
+    items = VanKitItem.objects.all()
+    total = items.count()
+    ordered_count = items.filter(ordered=True).count()
+    todo_count = total - ordered_count
+
+    if filter_key == 'todo':
+        items = items.filter(ordered=False)
+    elif filter_key == 'ordered':
+        items = items.filter(ordered=True)
+
+    return render(
+        request,
+        'planner/van_kit.html',
+        {
+            'items': items,
+            'filter_key': filter_key,
+            'total_count': total,
+            'ordered_count': ordered_count,
+            'todo_count': todo_count,
+            'scan_form': VanKitScanForm(),
+        },
+    )
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def van_kit_add(request):
+    filter_key = request.POST.get('filter') or 'todo'
+    form = VanKitItemForm(request.POST)
+    if form.is_valid():
+        item = form.save()
+        messages.success(request, f'Added {item.product_code} — {item.name}.')
+    else:
+        for err in form.errors.values():
+            for msg in err:
+                messages.error(request, msg)
+    return _van_kit_redirect(filter_key)
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def van_kit_bulk_add(request):
+    filter_key = request.POST.get('filter') or 'todo'
+    form = VanKitBulkForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Could not read the list.')
+        return _van_kit_redirect(filter_key)
+
+    added = 0
+    skipped = 0
+    for line in form.cleaned_data['lines'].splitlines():
+        parsed = _parse_van_kit_bulk_line(line)
+        if not parsed:
+            continue
+        code, name = parsed
+        if VanKitItem.objects.filter(product_code__iexact=code).exists():
+            skipped += 1
+            continue
+        VanKitItem.objects.create(product_code=code, name=name)
+        added += 1
+
+    if added:
+        messages.success(
+            request,
+            f'Added {added} item{"s" if added != 1 else ""}'
+            + (f' ({skipped} already listed).' if skipped else '.'),
+        )
+    elif skipped:
+        messages.info(request, f'Nothing new — {skipped} already on the list.')
+    else:
+        messages.warning(
+            request,
+            'No items found. Use one per line: CODE | Item name',
+        )
+    return _van_kit_redirect(filter_key)
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def van_kit_scan(request):
+    filter_key = request.POST.get('filter') or 'todo'
+    form = VanKitScanForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Enter a product code.')
+        return _van_kit_redirect(filter_key)
+
+    code = form.cleaned_data['product_code']
+    item = VanKitItem.objects.filter(product_code__iexact=code).first()
+    if not item:
+        # Also try matching without requiring exact stored normalisation
+        for candidate in VanKitItem.objects.all().only('id', 'product_code', 'name', 'ordered'):
+            if VanKitItem.normalise_code(candidate.product_code) == code:
+                item = candidate
+                break
+    if not item:
+        messages.error(request, f'No item with code {code}.')
+        return _van_kit_redirect(filter_key)
+
+    if item.ordered:
+        messages.info(request, f'{item.product_code} already marked ordered.')
+    else:
+        item.ordered = True
+        item.ordered_at = timezone.now()
+        item.save(update_fields=['ordered', 'ordered_at'])
+        messages.success(request, f'Marked {item.product_code} — {item.name}.')
+    return _van_kit_redirect(filter_key)
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def van_kit_toggle(request, pk: int):
+    filter_key = request.POST.get('filter') or 'todo'
+    item = get_object_or_404(VanKitItem, pk=pk)
+    item.ordered = not item.ordered
+    item.ordered_at = timezone.now() if item.ordered else None
+    item.save(update_fields=['ordered', 'ordered_at'])
+    state = 'ordered' if item.ordered else 'still to order'
+    messages.info(request, f'{item.product_code} → {state}.')
+    return _van_kit_redirect(filter_key)
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def van_kit_delete(request, pk: int):
+    filter_key = request.POST.get('filter') or 'todo'
+    item = get_object_or_404(VanKitItem, pk=pk)
+    label = f'{item.product_code} — {item.name}'
+    item.delete()
+    messages.info(request, f'Removed {label}.')
+    return _van_kit_redirect(filter_key)
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def van_kit_reset_ordered(request):
+    filter_key = request.POST.get('filter') or 'todo'
+    updated = VanKitItem.objects.filter(ordered=True).update(
+        ordered=False,
+        ordered_at=None,
+    )
+    messages.info(request, f'Cleared ordered mark on {updated} item(s).')
+    return _van_kit_redirect(filter_key)

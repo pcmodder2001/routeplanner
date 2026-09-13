@@ -1001,3 +1001,155 @@ a { color: var(--primary); }
   margin: 0;
 }
 
+/* Van kit (superuser) */
+.page-van-kit .page {
+  max-width: 52rem;
+}
+
+.van-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.pill-ok {
+  background: #d9f2e8;
+  color: #0b6e4f;
+}
+
+.van-scan-bar {
+  margin-bottom: 0.85rem;
+}
+
+.van-scan-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.van-scan-form .input {
+  flex: 1 1 14rem;
+  font-family: var(--mono);
+  font-size: 1.05rem;
+}
+
+.van-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  margin: 0 0 0.85rem;
+}
+
+.van-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.chip:hover {
+  color: var(--ink);
+  border-color: #b8c0b4;
+}
+
+.chip.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.van-table-wrap {
+  padding: 0;
+  overflow-x: auto;
+}
+
+.van-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.van-table th,
+.van-table td {
+  padding: 0.7rem 0.85rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.van-table th {
+  background: #e8eee6;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.van-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.van-table tbody tr.is-ordered {
+  background: #eef8f2;
+}
+
+.van-td-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.van-table tr.is-ordered .van-td-name {
+  color: #145c3f;
+}
+
+.van-td-code code {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.van-table tr.is-ordered .van-td-code code {
+  color: #0b6e4f;
+}
+
+.van-col-copy,
+.van-col-mark {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.van-col-copy .btn-copy,
+.van-copy {
+  min-width: 4.2rem;
+}
+
+@media (max-width: 640px) {
+  .van-table th,
+  .van-table td {
+    padding: 0.65rem 0.55rem;
+    font-size: 0.88rem;
+  }
+
+  .van-td-code code {
+    font-size: 0.8rem;
+  }
+}

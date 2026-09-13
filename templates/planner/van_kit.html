@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Van kit · Route Planner{% endblock %}
+{% block body_class %}page-van-kit{% endblock %}
+
+{% block content %}
+<section class="hero-bar">
+  <div>
+    <h1>Van kit</h1>
+    <p class="lede">Always-carry stock. Enter a product code to mark it ordered.</p>
+  </div>
+  <div class="van-stats">
+    <span class="pill">{{ todo_count }} to order</span>
+    <span class="pill pill-ok">{{ ordered_count }} ordered</span>
+  </div>
+</section>
+
+<div class="panel van-scan-bar">
+  <form method="post" action="{% url 'van_kit_scan' %}" class="van-scan-form" autocomplete="off">
+    {% csrf_token %}
+    <input type="hidden" name="filter" value="{{ filter_key }}">
+    {{ scan_form.product_code }}
+    <button type="submit" class="btn btn-accent">Mark ordered</button>
+  </form>
+</div>
+
+<div class="van-toolbar">
+  <div class="van-filters">
+    <a class="chip {% if filter_key == 'todo' %}is-active{% endif %}" href="{% url 'van_kit' %}?filter=todo">Still to order</a>
+    <a class="chip {% if filter_key == 'ordered' %}is-active{% endif %}" href="{% url 'van_kit' %}?filter=ordered">Ordered</a>
+    <a class="chip {% if filter_key == 'all' %}is-active{% endif %}" href="{% url 'van_kit' %}?filter=all">All</a>
+  </div>
+  {% if ordered_count %}
+  <form method="post" action="{% url 'van_kit_reset_ordered' %}"
+        onsubmit="return confirm('Clear all ordered marks?');">
+    {% csrf_token %}
+    <input type="hidden" name="filter" value="{{ filter_key }}">
+    <button type="submit" class="btn-link">Reset ordered</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if items %}
+<div class="panel van-table-wrap">
+  <table class="van-table">
+    <thead>
+      <tr>
+        <th scope="col">Item name</th>
+        <th scope="col">Code</th>
+        <th scope="col" class="van-col-copy">Copy</th>
+        <th scope="col" class="van-col-mark">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr class="{% if item.ordered %}is-ordered{% endif %}">
+        <td class="van-td-name">{{ item.name }}</td>
+        <td class="van-td-code"><code>{{ item.product_code }}</code></td>
+        <td class="van-col-copy">
+          <button type="button" class="btn-copy van-copy"
+                  data-copy="{{ item.product_code }}">Copy</button>
+        </td>
+        <td class="van-col-mark">
+          <form method="post" action="{% url 'van_kit_toggle' item.pk %}">
+            {% csrf_token %}
+            <input type="hidden" name="filter" value="{{ filter_key }}">
+            <button type="submit" class="btn btn-tiny {% if item.ordered %}btn-done{% else %}btn-ghost{% endif %}">
+              {% if item.ordered %}Ordered{% else %}Mark{% endif %}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty panel">
+  {% if filter_key == 'todo' and total_count %}
+  <p>Everything is marked ordered.</p>
+  {% elif filter_key == 'ordered' %}
+  <p>Nothing marked yet — enter a product code above.</p>
+  {% else %}
+  <p>No van kit items.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  document.querySelectorAll('.van-copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const text = btn.getAttribute('data-copy') || '';
+      if (!text) return;
+      const done = function () {
+        const prev = btn.textContent;
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(function () {
+          btn.textContent = prev;
+          btn.classList.remove('copied');
+        }, 1000);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {
+          window.prompt('Copy:', text);
+        });
+      } else {
+        window.prompt('Copy:', text);
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

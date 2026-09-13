@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 
-from .models import EngineerSettings, Job
+from .models import EngineerSettings, Job, VanKitItem
 
 User = get_user_model()
 
@@ -118,7 +118,6 @@ class JobForm(forms.ModelForm):
                 attrs={
                     'class': 'input input-caps',
                     'placeholder': 'ADDRESS, POSTCODE, OR BUSINESS — E.G. WF12 8AJ ESSO',
-                    'autofocus': True,
                     'autocapitalize': 'characters',
                     'spellcheck': 'false',
                 }
@@ -159,6 +158,87 @@ class JobNotesForm(forms.ModelForm):
                 }
             ),
         }
+
+
+class VanKitItemForm(forms.ModelForm):
+    class Meta:
+        model = VanKitItem
+        fields = ['name', 'product_code', 'notes']
+        widgets = {
+            'name': forms.TextInput(
+                attrs={
+                    'class': 'input',
+                    'placeholder': 'Item name',
+                }
+            ),
+            'product_code': forms.TextInput(
+                attrs={
+                    'class': 'input input-caps',
+                    'placeholder': 'Product code',
+                    'autocapitalize': 'characters',
+                    'spellcheck': 'false',
+                }
+            ),
+            'notes': forms.TextInput(
+                attrs={
+                    'class': 'input',
+                    'placeholder': 'Notes (optional)',
+                }
+            ),
+        }
+
+    def clean_name(self):
+        return (self.cleaned_data.get('name') or '').strip()
+
+    def clean_product_code(self):
+        code = VanKitItem.normalise_code(self.cleaned_data.get('product_code') or '')
+        if not code:
+            raise forms.ValidationError('Enter a product code.')
+        qs = VanKitItem.objects.filter(product_code__iexact=code)
+        if self.instance and self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise forms.ValidationError('That product code is already on the list.')
+        return code
+
+    def clean_notes(self):
+        return (self.cleaned_data.get('notes') or '').strip()
+
+
+class VanKitBulkForm(forms.Form):
+    lines = forms.CharField(
+        widget=forms.Textarea(
+            attrs={
+                'class': 'input',
+                'rows': 6,
+                'placeholder': 'One per line: CODE | Item name\ne.g. ABC123 | Fibre cleaver',
+                'spellcheck': 'false',
+            }
+        ),
+        help_text='CODE | Name  or  CODE - Name  (one item per line)',
+    )
+
+
+class VanKitScanForm(forms.Form):
+    product_code = forms.CharField(
+        max_length=64,
+        widget=forms.TextInput(
+            attrs={
+                'class': 'input input-caps',
+                'placeholder': 'Scan / type product code',
+                'autofocus': True,
+                'autocapitalize': 'characters',
+                'spellcheck': 'false',
+                'autocomplete': 'off',
+            }
+        ),
+    )
+
+    def clean_product_code(self):
+        code = VanKitItem.normalise_code(self.cleaned_data.get('product_code') or '')
+        if not code:
+            raise forms.ValidationError('Enter a product code.')
+        return code
 
 
 class SettingsForm(forms.ModelForm):

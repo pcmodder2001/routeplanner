@@ -699,11 +699,24 @@
   const mapEl = document.getElementById('map');
   if (!mapEl) return;
 
-  const map = L.map('map', { scrollWheelZoom: false });
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  const map = L.map('map', {
+    scrollWheelZoom: false,
+    // Keyboard focus makes mobile browsers scroll the map into view on load
+    keyboard: false
+  });
+  // OSM public tiles require a Referer (enforced recently). Leaflet's
+  // referrerPolicy option sets it on each tile <img>.
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    attribution: '&copy; OpenStreetMap'
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    referrerPolicy: 'strict-origin-when-cross-origin'
   }).addTo(map);
+
+  function stayAtPageTop() {
+    if (!window.matchMedia('(max-width: 860px)').matches) return;
+    window.scrollTo(0, 0);
+  }
 
   if (!points.length) {
     map.setView([54.5, -2.5], 6);
@@ -759,6 +772,12 @@
       map.fitBounds(latLngs, { padding: [36, 36] });
     }
   }
+
+  map.whenReady(stayAtPageTop);
+  stayAtPageTop();
+  requestAnimationFrame(stayAtPageTop);
+  setTimeout(stayAtPageTop, 50);
+  setTimeout(stayAtPageTop, 250);
 
   // Copy buttons + reorder (handle drag / ↑↓) — card body stays selectable
   function copyText(text, btn) {

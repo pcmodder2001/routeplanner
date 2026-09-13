@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <title>{% block title %}Route Planner{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,6 +27,7 @@
         <a href="{% url 'dashboard' %}">Today</a>
         <a href="{% url 'settings' %}">Start point</a>
         {% if user.is_superuser %}<a href="{% url 'engineers' %}">Engineers</a>{% endif %}
+        {% if user.is_superuser %}<a href="{% url 'van_kit' %}">Van kit</a>{% endif %}
         {% if user.is_staff %}<a href="/admin/">Admin</a>{% endif %}
         <span class="nav-user">{{ user.username }}</span>
         <form method="post" action="{% url 'logout' %}" class="nav-logout">

@@ -159,3 +159,33 @@ class DayRoute(models.Model):
     def __str__(self):
         who = self.user.username if self.user_id else 'unassigned'
         return f'{who} route for {self.job_date} ({self.total_miles:.1f} mi)'
+
+
+class VanKitItem(models.Model):
+    """Always-carry van stock checklist (superuser ordering tracker)."""
+
+    name = models.CharField(max_length=200)
+    product_code = models.CharField(
+        max_length=64,
+        unique=True,
+        help_text='Code used when marking as ordered',
+    )
+    notes = models.CharField(max_length=255, blank=True)
+    ordered = models.BooleanField(
+        default=False,
+        help_text='Green when this product has been ordered',
+    )
+    ordered_at = models.DateTimeField(null=True, blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sort_order', 'name', 'id']
+
+    def __str__(self):
+        return f'{self.product_code} — {self.name}'
+
+    @staticmethod
+    def normalise_code(code: str) -> str:
+        text = (code or '').strip().lstrip("'\"")
+        return ''.join(text.split()).upper()

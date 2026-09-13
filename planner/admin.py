@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DayRoute, EngineerSettings, Job
+from .models import DayRoute, EngineerSettings, Job, VanKitItem
 
 
 @admin.register(Job)
@@ -40,3 +40,17 @@ class DayRouteAdmin(admin.ModelAdmin):
     )
     list_filter = ('user', 'source', 'order_locked')
     raw_id_fields = ('user',)
+
+
+@admin.register(VanKitItem)
+class VanKitItemAdmin(admin.ModelAdmin):
+    list_display = (
+        'product_code',
+        'name',
+        'ordered',
+        'ordered_at',
+        'sort_order',
+    )
+    list_filter = ('ordered',)
+    search_fields = ('product_code', 'name', 'notes')
+    list_editable = ('ordered', 'sort_order')
