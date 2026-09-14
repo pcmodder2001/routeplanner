@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}All jobs · Route Planner{% endblock %}
+
+{% block content %}
+<section class="hero-bar">
+  <div>
+    <h1>All jobs</h1>
+    <p class="lede">
+      {% if is_super %}
+      Every job in the system — filter by status, engineer, date, or search.
+      {% else %}
+      Your jobs across every day — pending, complete, failed, MPU, and more.
+      {% endif %}
+    </p>
+  </div>
+</section>
+
+<div class="status-pills">
+  <a class="status-pill {% if not status %}is-active{% endif %}" href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if engineer_id %}engineer={{ engineer_id }}&{% endif %}{% if day_from %}from={{ day_from|date:'Y-m-d' }}&{% endif %}{% if day_to %}to={{ day_to|date:'Y-m-d' }}{% endif %}">
+    All
+  </a>
+  {% for row in status_summary %}
+  <a class="status-pill status-pill-{{ row.value }} {% if status == row.value %}is-active{% endif %}"
+     href="?status={{ row.value }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if engineer_id %}&engineer={{ engineer_id }}{% endif %}{% if day_from %}&from={{ day_from|date:'Y-m-d' }}{% endif %}{% if day_to %}&to={{ day_to|date:'Y-m-d' }}{% endif %}">
+    {{ row.label }} <span>{{ row.count }}</span>
+  </a>
+  {% endfor %}
+</div>
+
+<form method="get" action="{% url 'jobs_all' %}" class="panel jobs-filters">
+  {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+  <input class="input" type="search" name="q" value="{{ q }}"
+         placeholder="Ref, address, postcode, notes…">
+  {% if is_super %}
+  <select class="input" name="engineer" aria-label="Engineer">
+    <option value="">All engineers</option>
+    {% for eng in engineers %}
+    <option value="{{ eng.pk }}" {% if engineer_id == eng.pk|stringformat:"s" %}selected{% endif %}>{{ eng.username }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+  <label class="filter-date">
+    From
+    <input class="input input-compact" type="date" name="from" value="{% if day_from %}{{ day_from|date:'Y-m-d' }}{% endif %}">
+  </label>
+  <label class="filter-date">
+    To
+    <input class="input input-compact" type="date" name="to" value="{% if day_to %}{{ day_to|date:'Y-m-d' }}{% endif %}">
+  </label>
+  <button type="submit" class="btn btn-primary">Filter</button>
+  {% if q or status or engineer_id or day_from or day_to %}
+  <a class="btn btn-ghost" href="{% url 'jobs_all' %}">Clear</a>
+  {% endif %}
+</form>
+
+{% if jobs %}
+<p class="audit-count meta">Showing {{ shown }} of {{ total }}</p>
+<div class="panel jobs-table-wrap">
+  <table class="earnings-table jobs-all-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        {% if is_super %}<th>Engineer</th>{% endif %}
+        <th>Ref</th>
+        <th>Address</th>
+        <th>Slot</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th>Rate</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in jobs %}
+      <tr class="status-{{ job.status }}">
+        <td class="nowrap">{{ job.job_date|date:"D j M" }}</td>
+        {% if is_super %}
+        <td>{% if job.user %}{{ job.user.username }}{% else %}—{% endif %}</td>
+        {% endif %}
+        <td>{% if job.reference %}<code>{{ job.reference }}</code>{% else %}—{% endif %}</td>
+        <td>{{ job.geocode_display|default:job.location }}</td>
+        <td>{{ job.appointment_short }}</td>
+        <td>{{ job.work_type_label|default:"—" }}</td>
+        <td><span class="tag tag-status tag-status-{{ job.status }}">{{ job.get_status_display }}</span></td>
+        <td class="nowrap">
+          {% if job.status == 'failed' %}
+          <span class="rate-strike">{{ job.work_rate_display }}</span>
+          <span class="rate-zero">£0.00</span>
+          {% elif job.status == 'mpu' %}
+          <span class="rate-mpu">£15.00</span>
+          {% elif job.status == 'skipped' %}
+          —
+          {% else %}
+          {{ job.effective_rate_display|default:"—" }}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty panel">
+  {% if q or status or engineer_id or day_from or day_to %}
+  <p>No jobs matched these filters.</p>
+  {% else %}
+  <p>No jobs yet.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

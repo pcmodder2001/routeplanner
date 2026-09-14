@@ -25,13 +25,23 @@
       <nav class="nav">
         {% if user.is_authenticated %}
         <a href="{% url 'dashboard' %}">Today</a>
+        <a href="{% url 'jobs_all' %}">Jobs</a>
         <a href="{% url 'earnings' %}">Earnings</a>
         <a href="{% url 'settings' %}">Start point</a>
-        {% if user.is_superuser %}<a href="{% url 'engineers' %}">Engineers</a>{% endif %}
-        {% if user.is_superuser %}<a href="{% url 'bulk_pastes' %}">Pastes</a>{% endif %}
-        {% if user.is_superuser %}<a href="{% url 'audit_logs' %}">Audit</a>{% endif %}
-        {% if user.is_superuser %}<a href="{% url 'van_kit' %}">Van kit</a>{% endif %}
-        {% if user.is_staff %}<a href="/admin/">Admin</a>{% endif %}
+        {% if user.is_superuser %}
+        <details class="nav-menu">
+          <summary>Manage</summary>
+          <div class="nav-menu-panel">
+            <a href="{% url 'engineers' %}">Engineers</a>
+            <a href="{% url 'bulk_pastes' %}">Pastes</a>
+            <a href="{% url 'audit_logs' %}">Audit</a>
+            <a href="{% url 'van_kit' %}">Van kit</a>
+            {% if user.is_staff %}<a href="/admin/">Django admin</a>{% endif %}
+          </div>
+        </details>
+        {% elif user.is_staff %}
+        <a href="/admin/">Admin</a>
+        {% endif %}
         <span class="nav-user">{{ user.username }}</span>
         <form method="post" action="{% url 'logout' %}" class="nav-logout">
           {% csrf_token %}
@@ -65,6 +75,13 @@
   </main>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+  document.addEventListener('click', (e) => {
+    document.querySelectorAll('details.nav-menu[open]').forEach((menu) => {
+      if (!menu.contains(e.target)) menu.removeAttribute('open');
+    });
+  });
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

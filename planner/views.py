@@ -1215,6 +1215,90 @@ def _parse_iso_date(raw: str) -> date | None:
 
 
 @login_required
+def jobs_all(request):
+    """Browse jobs across days/statuses (all engineers for superusers)."""
+    planner = active_user(request)
+    q = (request.GET.get('q') or '').strip()
+    status = (request.GET.get('status') or '').strip()
+    day_from = _parse_iso_date(request.GET.get('from', ''))
+    day_to = _parse_iso_date(request.GET.get('to', ''))
+    engineer_id = (request.GET.get('engineer') or '').strip()
+
+    jobs = Job.objects.select_related('user').order_by(
+        '-job_date', 'status', 'route_order', 'id'
+    )
+
+    is_super = request.user.is_superuser
+    engineers = []
+    selected_engineer = None
+    if is_super:
+        engineers = list(list_engineers())
+        if engineer_id.isdigit():
+            selected_engineer = next(
+                (u for u in engineers if u.pk == int(engineer_id)), None
+            )
+            if selected_engineer:
+                jobs = jobs.filter(user=selected_engineer)
+        # else: all engineers
+    else:
+        jobs = jobs.filter(user=planner)
+
+    if status and status in {c.value for c in Job.Status}:
+        jobs = jobs.filter(status=status)
+    if day_from:
+        jobs = jobs.filter(job_date__gte=day_from)
+    if day_to:
+        jobs = jobs.filter(job_date__lte=day_to)
+    if q:
+        jobs = jobs.filter(
+            Q(reference__icontains=q)
+            | Q(location__icontains=q)
+            | Q(geocode_display__icontains=q)
+            | Q(notes__icontains=q)
+            | Q(user__username__icontains=q)
+        )
+
+    total = jobs.count()
+    jobs = list(jobs[:400])
+
+    if is_super:
+        counts_qs = Job.objects.all()
+        if selected_engineer:
+            counts_qs = counts_qs.filter(user=selected_engineer)
+    else:
+        counts_qs = Job.objects.filter(user=planner)
+
+    counts_raw = {
+        row['status']: row['n']
+        for row in counts_qs.values('status').annotate(n=Count('id'))
+    }
+    status_summary = [
+        {'value': value, 'label': label, 'count': counts_raw.get(value, 0)}
+        for value, label in Job.Status.choices
+    ]
+
+    return render(
+        request,
+        'planner/jobs_all.html',
+        {
+            'jobs': jobs,
+            'q': q,
+            'status': status,
+            'day_from': day_from,
+            'day_to': day_to,
+            'status_choices': Job.Status.choices,
+            'status_summary': status_summary,
+            'is_super': is_super,
+            'engineers': engineers,
+            'selected_engineer': selected_engineer,
+            'engineer_id': str(selected_engineer.pk) if selected_engineer else '',
+            'total': total,
+            'shown': len(jobs),
+        },
+    )
+
+
+@login_required
 def earnings_view(request):
     """Weekly / custom-range earnings for the active engineer."""
     planner = active_user(request)

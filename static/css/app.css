@@ -83,7 +83,9 @@ a { color: var(--primary); }
 
 .nav {
   display: flex;
-  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.85rem 1rem;
   font-weight: 500;
 }
 
@@ -93,6 +95,54 @@ a { color: var(--primary); }
 }
 
 .nav a:hover { color: var(--ink); }
+
+.nav-menu {
+  position: relative;
+}
+
+.nav-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.nav-menu > summary::-webkit-details-marker { display: none; }
+
+.nav-menu > summary::after {
+  content: " ▾";
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+
+.nav-menu[open] > summary { color: var(--ink); }
+
+.nav-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  min-width: 11rem;
+  padding: 0.4rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(20, 30, 20, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  z-index: 40;
+}
+
+.nav-menu-panel a {
+  padding: 0.45rem 0.65rem;
+  border-radius: 7px;
+  color: var(--ink);
+}
+
+.nav-menu-panel a:hover {
+  background: #eef3ec;
+  color: var(--ink);
+}
 
 .nav-user {
   color: var(--ink);
@@ -1564,10 +1614,90 @@ a { color: var(--primary); }
   color: #3730a3;
 }
 
+.status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0 0 0.85rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.status-pill span {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.status-pill.is-active {
+  border-color: var(--primary);
+  background: #e8f2e6;
+  color: var(--ink);
+}
+
+.jobs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: end;
+  margin-bottom: 0.85rem;
+}
+
+.jobs-filters .input[type="search"] {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.jobs-filters select.input {
+  flex: 0 1 11rem;
+}
+
+.filter-date {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.jobs-table-wrap {
+  overflow-x: auto;
+  padding: 0;
+}
+
+.jobs-all-table {
+  margin: 0;
+}
+
+.jobs-all-table th,
+.jobs-all-table td {
+  padding: 0.65rem 0.85rem;
+}
+
+.nowrap { white-space: nowrap; }
+
 @media (max-width: 640px) {
   .audit-row {
     grid-template-columns: 1fr;
     gap: 0.35rem;
   }
+
+  .nav-menu-panel {
+    right: auto;
+    left: 0;
+  }
 }
+
 
