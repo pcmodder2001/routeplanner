@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Audit logs · Route Planner{% endblock %}
+
+{% block content %}
+<section class="hero-bar">
+  <div>
+    <h1>Audit logs</h1>
+    <p class="lede">Every login, job change, route action, and admin switch — newest first.</p>
+  </div>
+</section>
+
+<form method="get" action="{% url 'audit_logs' %}" class="panel paste-search audit-filters">
+  <input class="input" type="search" name="q" value="{{ q }}"
+         placeholder="User, job ref, postcode, message, IP…"
+         autofocus>
+  <select class="input" name="action" aria-label="Action">
+    <option value="">All actions</option>
+    {% for value, label in action_choices %}
+    <option value="{{ value }}" {% if action == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn-primary">Filter</button>
+  {% if q or action %}
+  <a class="btn btn-ghost" href="{% url 'audit_logs' %}">Clear</a>
+  {% endif %}
+</form>
+
+{% if logs %}
+<p class="audit-count meta">Showing {{ shown }} of {{ total }}</p>
+<ul class="audit-list">
+  {% for log in logs %}
+  <li class="audit-row action-{{ log.action }}">
+    <div class="audit-when">
+      <time datetime="{{ log.created_at|date:'c' }}">{{ log.created_at|date:"D j M · H:i:s" }}</time>
+      {% if log.ip_address %}<span class="audit-ip">{{ log.ip_address }}</span>{% endif %}
+    </div>
+    <div class="audit-body">
+      <div class="audit-head">
+        <span class="audit-action tag-status">{{ log.get_action_display }}</span>
+        <span class="audit-who">
+          {% if log.actor %}{{ log.actor.username }}{% else %}anonymous{% endif %}
+          {% if log.subject_id and log.subject_id != log.actor_id %}
+          → {{ log.subject.username }}
+          {% endif %}
+        </span>
+      </div>
+      {% if log.message %}<p class="audit-msg">{{ log.message }}</p>{% endif %}
+      {% if log.job_reference or log.job_location %}
+      <p class="audit-job meta">
+        {% if log.job_reference %}<strong>{{ log.job_reference }}</strong>{% endif %}
+        {% if log.job_location %}{{ log.job_location }}{% endif %}
+        {% if log.job_id %}<span class="muted">#{{ log.job_id }}</span>{% endif %}
+      </p>
+      {% endif %}
+      {% if log.details %}
+      <details class="audit-details">
+        <summary>Details</summary>
+        <pre>{{ log.details }}</pre>
+      </details>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty panel">
+  {% if q or action %}
+  <p>No audit entries matched.</p>
+  {% else %}
+  <p>No audit entries yet. They appear as people use the planner.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

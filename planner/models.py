@@ -299,3 +299,67 @@ class BulkPasteLog(models.Model):
         when = self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '?'
         who = self.user.username if self.user_id else '?'
         return f'Paste {when} · {who} ({self.jobs_added} added)'
+
+
+class AuditLog(models.Model):
+    """Append-only log of planner actions (login, jobs, routes, etc.)."""
+
+    class Action(models.TextChoices):
+        LOGIN = 'login', 'Login'
+        LOGIN_FAILED = 'login_failed', 'Login failed'
+        LOGOUT = 'logout', 'Logout'
+        REGISTER = 'register', 'Register'
+        ADD_JOB = 'add_job', 'Add job'
+        DELETE_JOB = 'delete_job', 'Delete job'
+        BULK_ADD = 'bulk_add', 'Bulk add jobs'
+        CLEAR_ROUTE = 'clear_route', 'Clear route'
+        PLAN_ROUTE = 'plan_route', 'Plan route'
+        REORDER = 'reorder', 'Reorder jobs'
+        UNLOCK_ORDER = 'unlock_order', 'Unlock order'
+        JOB_COMPLETE = 'job_complete', 'Job complete'
+        JOB_MPU = 'job_mpu', 'Job MPU'
+        JOB_FAILED = 'job_failed', 'Job failed'
+        JOB_SKIPPED = 'job_skipped', 'Job skipped'
+        JOB_REOPENED = 'job_reopened', 'Job reopened'
+        UPDATE_APPOINTMENT = 'update_appointment', 'Update appointment'
+        UPDATE_NOTES = 'update_notes', 'Update notes'
+        SETTINGS_UPDATE = 'settings_update', 'Settings update'
+        VIEW_AS = 'view_as', 'View as engineer'
+        STOP_VIEW_AS = 'stop_view_as', 'Stop view as'
+        VAN_KIT_SCAN = 'van_kit_scan', 'Van kit scan'
+        VAN_KIT_TOGGLE = 'van_kit_toggle', 'Van kit toggle'
+        VAN_KIT_RESET = 'van_kit_reset', 'Van kit reset ordered'
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='audit_logs_as_actor',
+        help_text='Signed-in user who performed the action',
+    )
+    subject = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='audit_logs_as_subject',
+        help_text='Engineer whose data was affected (e.g. view-as target)',
+    )
+    action = models.CharField(max_length=32, choices=Action.choices, db_index=True)
+    message = models.CharField(max_length=500, blank=True)
+    details = models.JSONField(default=dict, blank=True)
+    job_id = models.PositiveIntegerField(null=True, blank=True)
+    job_reference = models.CharField(max_length=100, blank=True)
+    job_location = models.CharField(max_length=255, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=400, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        when = self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '?'
+        who = self.actor.username if self.actor_id else 'anonymous'
+        return f'{when} · {who} · {self.get_action_display()}'

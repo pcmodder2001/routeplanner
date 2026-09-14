@@ -19,6 +19,7 @@ from .acting import (
     list_engineers,
     set_view_as,
 )
+from .audit import log_audit
 from .bulk_parse import (
     diff_bulk_against_route,
     extract_uk_postcode,
@@ -48,7 +49,7 @@ from .geocoding import (
     google_place_details,
     paf_lookup_enabled,
 )
-from .models import DayRoute, EngineerSettings, Job, VanKitItem, BulkPasteLog
+from .models import BulkPasteLog, DayRoute, EngineerSettings, Job, VanKitItem, AuditLog
 from .osrm import active_routing_label
 from .planner_day import (
     format_planner_day,
@@ -91,8 +92,21 @@ def login_view(request):
             password=form.cleaned_data['password'],
         )
         if user is None:
+            log_audit(
+                request,
+                AuditLog.Action.LOGIN_FAILED,
+                message=f'Failed login for “{form.cleaned_data["username"]}”',
+                details={'username': form.cleaned_data['username']},
+            )
             messages.error(request, 'Invalid username or password.')
         elif not user.is_active:
+            log_audit(
+                request,
+                AuditLog.Action.LOGIN_FAILED,
+                message=f'Disabled account login: {user.username}',
+                actor=user,
+                details={'username': user.username, 'reason': 'disabled'},
+            )
             messages.error(request, 'This account is disabled.')
         else:
             login(request, user)
@@ -102,6 +116,13 @@ def login_view(request):
             else:
                 request.session.set_expiry(0)  # until browser closes
             EngineerSettings.for_user(user)
+            log_audit(
+                request,
+                AuditLog.Action.LOGIN,
+                message=f'{user.username} signed in',
+                actor=user,
+                details={'remember_me': bool(form.cleaned_data.get('remember_me'))},
+            )
             next_url = request.GET.get('next') or request.POST.get('next') or '/'
             if not next_url.startswith('/'):
                 next_url = '/'
@@ -132,6 +153,12 @@ def register_view(request):
         else:
             request.session.set_expiry(0)
         EngineerSettings.for_user(user)
+        log_audit(
+            request,
+            AuditLog.Action.REGISTER,
+            message=f'Account created: {user.username}',
+            actor=user,
+        )
         messages.success(request, f'Welcome, {user.username} — account created.')
         return redirect('dashboard')
 
@@ -140,6 +167,14 @@ def register_view(request):
 
 @require_POST
 def logout_view(request):
+    user = request.user if request.user.is_authenticated else None
+    username = user.username if user else 'anonymous'
+    log_audit(
+        request,
+        AuditLog.Action.LOGOUT,
+        message=f'{username} signed out',
+        actor=user,
+    )
     clear_view_as(request)
     logout(request)
     messages.info(request, 'Signed out.')
@@ -170,6 +205,12 @@ def view_as_user(request, user_id: int):
     if other is None:
         messages.info(request, 'Viewing your own account.')
     else:
+        log_audit(
+            request,
+            AuditLog.Action.VIEW_AS,
+            message=f'Viewing as {other.username}',
+            subject=other,
+        )
         messages.info(request, f'Viewing as {other.username}.')
     return redirect('dashboard')
 
@@ -178,6 +219,13 @@ def view_as_user(request, user_id: int):
 @user_passes_test(_superuser_required)
 @require_POST
 def stop_view_as(request):
+    viewed = active_user(request)
+    log_audit(
+        request,
+        AuditLog.Action.STOP_VIEW_AS,
+        message='Stopped view-as',
+        subject=viewed if viewed.pk != request.user.pk else None,
+    )
     clear_view_as(request)
     messages.info(request, 'Back to your own account.')
     return redirect('dashboard')
@@ -446,6 +494,19 @@ def add_job(request):
             leg_minutes_from_previous=None,
         )
         DayRoute.objects.filter(user=planner, job_date=job.job_date).delete()
+        log_audit(
+            request,
+            AuditLog.Action.ADD_JOB,
+            message=f'Added job {job.geocode_display or job.location}',
+            subject=planner,
+            job=job,
+            details={
+                'reference': job.reference,
+                'appointment_type': job.appointment_type,
+                'work_type': job.work_type,
+                'job_date': str(job.job_date),
+            },
+        )
         return redirect('dashboard')
 
     messages.error(request, 'Could not add job — check the form.')
@@ -684,6 +745,22 @@ def bulk_add_confirm(request):
         jobs_removed=removed,
     )
 
+    log_audit(
+        request,
+        AuditLog.Action.BULK_ADD,
+        message=(
+            f'Bulk add: +{created} job{"s" if created != 1 else ""}'
+            + (f', −{removed} removed' if removed else '')
+        ),
+        subject=planner,
+        details={
+            'jobs_added': created,
+            'jobs_removed': removed,
+            'job_date': str(day),
+            'geocode_fail': geocode_fail,
+        },
+    )
+
     parts = []
     if created:
         parts.append(f'Added {created} job{"s" if created != 1 else ""}')
@@ -722,6 +799,14 @@ def bulk_add_confirm(request):
 def delete_job(request, pk):
     planner = active_user(request)
     job = _user_job(request, pk)
+    log_audit(
+        request,
+        AuditLog.Action.DELETE_JOB,
+        message=f'Deleted job {job.geocode_display or job.location}',
+        subject=planner,
+        job=job,
+        details={'reference': job.reference, 'status': job.status},
+    )
     job.delete()
     plan_current_route(planner, unlock=False)
     messages.info(request, 'Job removed.')
@@ -759,6 +844,14 @@ def update_appointment(request, pk):
                 leg_minutes_from_previous=None,
             )
             DayRoute.objects.filter(user=planner, job_date=day).delete()
+            log_audit(
+                request,
+                AuditLog.Action.UPDATE_APPOINTMENT,
+                message=f'Appointment → {job.appointment_short}',
+                subject=planner,
+                job=job,
+                details={'appointment_type': job.appointment_type},
+            )
         else:
             messages.info(request, 'Appointment unchanged.')
     else:
@@ -777,6 +870,13 @@ def update_notes(request, pk):
     )
     if form.is_valid():
         form.save()
+        log_audit(
+            request,
+            AuditLog.Action.UPDATE_NOTES,
+            message=f'Note updated on {job.geocode_display or job.location}',
+            subject=active_user(request),
+            job=job,
+        )
         messages.success(request, 'Note saved.')
     else:
         messages.error(request, 'Could not save note.')
@@ -786,10 +886,19 @@ def update_notes(request, pk):
 @login_required
 @require_POST
 def mark_job(request, pk):
+    planner = active_user(request)
     job = _user_job(request, pk)
     action = request.POST.get('action', '')
     if action in ('done', 'complete'):
         set_job_status(job, Job.Status.DONE)
+        log_audit(
+            request,
+            AuditLog.Action.JOB_COMPLETE,
+            message=f'Completed {job.geocode_display or job.location}',
+            subject=planner,
+            job=job,
+            details={'reference': job.reference, 'work_type': job.work_type},
+        )
         messages.success(
             request, f'Completed: {job.geocode_display or job.location}'
         )
@@ -801,21 +910,55 @@ def mark_job(request, pk):
             )
         else:
             set_job_status(job, Job.Status.MPU)
+            log_audit(
+                request,
+                AuditLog.Action.JOB_MPU,
+                message=f'MPU {job.geocode_display or job.location} (£{Job.MPU_RATE:.2f})',
+                subject=planner,
+                job=job,
+                details={
+                    'reference': job.reference,
+                    'work_type': job.work_type,
+                    'rate': str(Job.MPU_RATE),
+                },
+            )
             messages.success(
                 request,
                 f'MPU: {job.geocode_display or job.location} — £{Job.MPU_RATE:.2f}',
             )
     elif action == 'fail':
         set_job_status(job, Job.Status.FAILED)
+        log_audit(
+            request,
+            AuditLog.Action.JOB_FAILED,
+            message=f'Failed {job.geocode_display or job.location}',
+            subject=planner,
+            job=job,
+            details={'reference': job.reference, 'work_type': job.work_type},
+        )
         messages.info(
             request,
             f'Failed: {job.geocode_display or job.location} — £0 on earnings',
         )
     elif action == 'skip':
         set_job_status(job, Job.Status.SKIPPED)
+        log_audit(
+            request,
+            AuditLog.Action.JOB_SKIPPED,
+            message=f'Skipped {job.geocode_display or job.location}',
+            subject=planner,
+            job=job,
+        )
         messages.info(request, f'Skipped: {job.geocode_display or job.location}')
     elif action == 'reopen':
         set_job_status(job, Job.Status.PENDING)
+        log_audit(
+            request,
+            AuditLog.Action.JOB_REOPENED,
+            message=f'Reopened {job.geocode_display or job.location}',
+            subject=planner,
+            job=job,
+        )
         messages.info(request, 'Job reopened — re-plan if needed.')
     else:
         messages.error(request, 'Unknown action.')
@@ -843,6 +986,13 @@ def reorder_jobs(request):
         return JsonResponse({'ok': False, 'error': 'forbidden'}, status=403)
 
     plan = apply_manual_order(planner, ids)
+    log_audit(
+        request,
+        AuditLog.Action.REORDER,
+        message=f'Manual reorder ({len(ids)} stops)',
+        subject=planner,
+        details={'order': ids, 'job_count': plan.job_count},
+    )
     if request.headers.get('x-requested-with') == 'XMLHttpRequest':
         return JsonResponse(
             {
@@ -863,6 +1013,13 @@ def unlock_order(request):
     DayRoute.objects.filter(user=planner, job_date=planner_today()).update(
         order_locked=False
     )
+    log_audit(
+        request,
+        AuditLog.Action.UNLOCK_ORDER,
+        message='Order unlocked',
+        subject=planner,
+        details={'job_date': str(planner_today())},
+    )
     messages.info(request, 'Order unlocked — Plan best route to auto-optimise again.')
     return redirect('dashboard')
 
@@ -876,6 +1033,21 @@ def plan_route(request):
         messages.warning(request, warning)
     if plan.job_count:
         drive = f'{plan.total_minutes} min' if plan.total_minutes else ''
+        log_audit(
+            request,
+            AuditLog.Action.PLAN_ROUTE,
+            message=(
+                f'Planned {plan.job_count} stops, {plan.total_miles} mi'
+                + (f', {drive}' if drive else '')
+            ),
+            subject=planner,
+            details={
+                'job_count': plan.job_count,
+                'total_miles': plan.total_miles,
+                'total_minutes': plan.total_minutes,
+                'job_date': str(planner_today()),
+            },
+        )
         messages.success(
             request,
             f'Route planned: {plan.job_count} stops, {plan.total_miles} miles'
@@ -916,6 +1088,17 @@ def settings_view(request):
             else:
                 messages.success(request, 'Settings cleared.')
             obj.save()
+            log_audit(
+                request,
+                AuditLog.Action.SETTINGS_UPDATE,
+                message=f'Start point updated: {obj.start_display or obj.start_location or "(cleared)"}',
+                subject=planner,
+                details={
+                    'start_label': obj.start_label,
+                    'start_location': obj.start_location,
+                    'start_display': obj.start_display,
+                },
+            )
             return redirect('settings')
     else:
         form = SettingsForm(instance=settings)
@@ -970,12 +1153,53 @@ def bulk_paste_detail(request, pk: int):
 
 
 @login_required
+@user_passes_test(_superuser_required)
+def audit_logs(request):
+    """Browseable audit trail for all planner actions."""
+    q = (request.GET.get('q') or '').strip()
+    action = (request.GET.get('action') or '').strip()
+    logs = AuditLog.objects.select_related('actor', 'subject')
+    if action and action in {c.value for c in AuditLog.Action}:
+        logs = logs.filter(action=action)
+    if q:
+        logs = logs.filter(
+            Q(message__icontains=q)
+            | Q(job_reference__icontains=q)
+            | Q(job_location__icontains=q)
+            | Q(actor__username__icontains=q)
+            | Q(subject__username__icontains=q)
+            | Q(ip_address__icontains=q)
+        )
+    total = logs.count()
+    logs = logs[:300]
+    return render(
+        request,
+        'planner/audit_logs.html',
+        {
+            'logs': logs,
+            'q': q,
+            'action': action,
+            'action_choices': AuditLog.Action.choices,
+            'total': total,
+            'shown': min(total, 300),
+        },
+    )
+
+
+@login_required
 @require_POST
 def clear_route(request):
     planner = active_user(request)
     day = planner_today()
     count = Job.objects.filter(user=planner, job_date=day).count()
     clear_current_route(planner, clear_jobs=True)
+    log_audit(
+        request,
+        AuditLog.Action.CLEAR_ROUTE,
+        message=f'Cleared route ({count} job(s) removed)',
+        subject=planner,
+        details={'jobs_removed': count, 'job_date': str(day)},
+    )
     messages.info(request, f'Route cleared ({count} job(s) removed).')
     return redirect('dashboard')
 
@@ -1193,6 +1417,12 @@ def van_kit_scan(request):
         item.ordered = True
         item.ordered_at = timezone.now()
         item.save(update_fields=['ordered', 'ordered_at'])
+        log_audit(
+            request,
+            AuditLog.Action.VAN_KIT_SCAN,
+            message=f'Van kit ordered: {item.product_code} — {item.name}',
+            details={'product_code': item.product_code, 'name': item.name},
+        )
         messages.success(request, f'Marked {item.product_code} — {item.name}.')
     return _van_kit_redirect(filter_key)
 
@@ -1207,6 +1437,15 @@ def van_kit_toggle(request, pk: int):
     item.ordered_at = timezone.now() if item.ordered else None
     item.save(update_fields=['ordered', 'ordered_at'])
     state = 'ordered' if item.ordered else 'still to order'
+    log_audit(
+        request,
+        AuditLog.Action.VAN_KIT_TOGGLE,
+        message=f'Van kit {item.product_code} → {state}',
+        details={
+            'product_code': item.product_code,
+            'ordered': item.ordered,
+        },
+    )
     messages.info(request, f'{item.product_code} → {state}.')
     return _van_kit_redirect(filter_key)
 
@@ -1231,6 +1470,12 @@ def van_kit_reset_ordered(request):
     updated = VanKitItem.objects.filter(ordered=True).update(
         ordered=False,
         ordered_at=None,
+    )
+    log_audit(
+        request,
+        AuditLog.Action.VAN_KIT_RESET,
+        message=f'Cleared ordered mark on {updated} van kit item(s)',
+        details={'cleared': updated},
     )
     messages.info(request, f'Cleared ordered mark on {updated} item(s).')
     return _van_kit_redirect(filter_key)

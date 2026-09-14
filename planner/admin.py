@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import BulkPasteLog, DayRoute, EngineerSettings, Job, VanKitItem
+from .models import AuditLog, BulkPasteLog, DayRoute, EngineerSettings, Job, VanKitItem
 
 
 @admin.register(Job)
@@ -71,3 +71,45 @@ class BulkPasteLogAdmin(admin.ModelAdmin):
     search_fields = ('raw_text', 'search_text', 'user__username')
     raw_id_fields = ('user', 'created_by')
     readonly_fields = ('created_at', 'search_text')
+
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = (
+        'created_at',
+        'action',
+        'actor',
+        'subject',
+        'message',
+        'job_reference',
+        'ip_address',
+    )
+    list_filter = ('action', 'created_at')
+    search_fields = (
+        'message',
+        'job_reference',
+        'job_location',
+        'actor__username',
+        'subject__username',
+        'ip_address',
+    )
+    raw_id_fields = ('actor', 'subject')
+    readonly_fields = (
+        'actor',
+        'subject',
+        'action',
+        'message',
+        'details',
+        'job_id',
+        'job_reference',
+        'job_location',
+        'ip_address',
+        'user_agent',
+        'created_at',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

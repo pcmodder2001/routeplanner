@@ -22,6 +22,7 @@ urlpatterns = [
     path('jobs/bulk/confirm/', views.bulk_add_confirm, name='bulk_add_confirm'),
     path('bulk-pastes/', views.bulk_pastes, name='bulk_pastes'),
     path('bulk-pastes/<int:pk>/', views.bulk_paste_detail, name='bulk_paste_detail'),
+    path('audit-logs/', views.audit_logs, name='audit_logs'),
     path('jobs/<int:pk>/delete/', views.delete_job, name='delete_job'),
     path('jobs/<int:pk>/appointment/', views.update_appointment, name='update_appointment'),
     path('jobs/<int:pk>/notes/', views.update_notes, name='update_notes'),

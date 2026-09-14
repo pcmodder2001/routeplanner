@@ -1425,3 +1425,149 @@ a { color: var(--primary); }
   max-height: 70vh;
   overflow: auto;
 }
+
+.audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.audit-filters .input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.audit-filters select.input {
+  flex: 0 1 14rem;
+}
+
+.audit-count {
+  margin: 0 0 0.65rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 10rem) 1fr;
+  gap: 0.75rem 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
+}
+
+.audit-when {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-ip {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  word-break: break-all;
+}
+
+.audit-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  margin-bottom: 0.25rem;
+}
+
+.audit-action {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+}
+
+.audit-who {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.audit-msg {
+  margin: 0.15rem 0 0;
+  font-size: 0.95rem;
+}
+
+.audit-job {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+}
+
+.audit-details {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+}
+
+.audit-details summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.audit-details pre {
+  margin: 0.35rem 0 0;
+  padding: 0.45rem 0.55rem;
+  background: #f3f7f1;
+  border-radius: 8px;
+  border: 1px solid #e0e7de;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 10rem;
+  overflow: auto;
+}
+
+.action-login_failed .audit-action {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.action-job_failed .audit-action,
+.action-clear_route .audit-action {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.action-job_complete .audit-action,
+.action-login .audit-action {
+  background: #d9f2e8;
+  color: var(--am);
+}
+
+.action-job_mpu .audit-action {
+  background: #fef3c7;
+  color: #a16207;
+}
+
+.action-bulk_add .audit-action,
+.action-add_job .audit-action {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+@media (max-width: 640px) {
+  .audit-row {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+}
+
