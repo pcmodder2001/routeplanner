@@ -48,7 +48,7 @@ from .geocoding import (
     google_place_details,
     paf_lookup_enabled,
 )
-from .models import DayRoute, EngineerSettings, Job, VanKitItem
+from .models import DayRoute, EngineerSettings, Job, VanKitItem, BulkPasteLog
 from .osrm import active_routing_label
 from .planner_day import (
     format_planner_day,
@@ -65,6 +65,7 @@ from .routing import (
     plan_current_route,
     set_job_status,
 )
+
 
 REMEMBER_ME_SECONDS = 60 * 60 * 24 * 90  # 90 days
 
@@ -471,6 +472,50 @@ def _job_payload(j: dict) -> dict:
     }
 
 
+def _bulk_paste_search_text(raw: str, items: list) -> str:
+    """Build a searchable blob from raw paste + parsed job fields."""
+    bits = [raw or '']
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        for key in (
+            'reference',
+            'jin',
+            'location',
+            'postcode',
+            'work_type_label',
+            'appointment_type',
+        ):
+            val = str(item.get(key) or '').strip()
+            if val:
+                bits.append(val)
+    return ' '.join(bits).lower()
+
+
+def _save_bulk_paste_log(
+    *,
+    request,
+    planner,
+    day,
+    raw: str,
+    items: list,
+    jobs_added: int,
+    jobs_removed: int,
+) -> BulkPasteLog | None:
+    raw = (raw or '').strip()
+    if not raw:
+        return None
+    return BulkPasteLog.objects.create(
+        user=planner,
+        created_by=request.user if request.user.is_authenticated else None,
+        job_date=day,
+        raw_text=raw,
+        search_text=_bulk_paste_search_text(raw, items),
+        jobs_added=jobs_added,
+        jobs_removed=jobs_removed,
+    )
+
+
 @login_required
 @require_POST
 def bulk_add_preview(request):
@@ -628,6 +673,17 @@ def bulk_add_confirm(request):
     DayRoute.objects.filter(user=planner, job_date=day).delete()
     plan = plan_current_route(planner, unlock=True)
 
+    raw = str(body.get('raw') or '')
+    _save_bulk_paste_log(
+        request=request,
+        planner=planner,
+        day=day,
+        raw=raw,
+        items=items,
+        jobs_added=created,
+        jobs_removed=removed,
+    )
+
     parts = []
     if created:
         parts.append(f'Added {created} job{"s" if created != 1 else ""}')
@@ -737,6 +793,18 @@ def mark_job(request, pk):
         messages.success(
             request, f'Completed: {job.geocode_display or job.location}'
         )
+    elif action == 'mpu':
+        if not job.allows_mpu:
+            messages.error(
+                request,
+                'MPU is only for repair jobs (SOGEA / OGEA / copper), not installs.',
+            )
+        else:
+            set_job_status(job, Job.Status.MPU)
+            messages.success(
+                request,
+                f'MPU: {job.geocode_display or job.location} — £{Job.MPU_RATE:.2f}',
+            )
     elif action == 'fail':
         set_job_status(job, Job.Status.FAILED)
         messages.info(
@@ -860,6 +928,44 @@ def settings_view(request):
             'settings': settings,
             'routing_provider': active_routing_label(),
         },
+    )
+
+
+@login_required
+@user_passes_test(_superuser_required)
+def bulk_pastes(request):
+    """Searchable archive of work-pack pastes."""
+    q = (request.GET.get('q') or '').strip()
+    pastes = BulkPasteLog.objects.select_related('user', 'created_by')
+    if q:
+        pastes = pastes.filter(
+            Q(raw_text__icontains=q)
+            | Q(search_text__icontains=q.lower())
+            | Q(user__username__icontains=q)
+            | Q(created_by__username__icontains=q)
+        )
+    pastes = pastes[:200]
+    return render(
+        request,
+        'planner/bulk_pastes.html',
+        {
+            'pastes': pastes,
+            'q': q,
+        },
+    )
+
+
+@login_required
+@user_passes_test(_superuser_required)
+def bulk_paste_detail(request, pk: int):
+    paste = get_object_or_404(
+        BulkPasteLog.objects.select_related('user', 'created_by'),
+        pk=pk,
+    )
+    return render(
+        request,
+        'planner/bulk_paste_detail.html',
+        {'paste': paste},
     )
 
 

@@ -59,8 +59,11 @@ class Job(models.Model):
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'
         DONE = 'done', 'Complete'
+        MPU = 'mpu', 'MPU'
         FAILED = 'failed', 'Failed'
         SKIPPED = 'skipped', 'Skipped'
+
+    MPU_RATE = Decimal('15.00')
 
     class WorkType(models.TextChoices):
         MANAGED_INSTALL = 'managed_install', 'Managed install'
@@ -171,17 +174,23 @@ class Job(models.Model):
         return f'£{rate:.2f}'
 
     @property
-    def earns_rate(self) -> bool:
-        """False when failed/skipped — show £0 / strike through."""
-        return self.status not in (self.Status.FAILED, self.Status.SKIPPED)
+    def allows_mpu(self) -> bool:
+        """MPU part-payment is only valid on repair work types."""
+        return self.work_type in (
+            self.WorkType.SOGEA_REPAIR,
+            self.WorkType.OGEA_REPAIR,
+            self.WorkType.COPPER_REPAIR,
+        )
 
     @property
     def effective_rate_display(self) -> str:
-        if not self.work_type:
-            return ''
         if self.status == self.Status.FAILED:
             return '£0.00'
         if self.status == self.Status.SKIPPED:
+            return ''
+        if self.status == self.Status.MPU:
+            return f'£{self.MPU_RATE:.2f}'
+        if not self.work_type:
             return ''
         return self.work_rate_display
 
@@ -252,3 +261,41 @@ class VanKitItem(models.Model):
     def normalise_code(code: str) -> str:
         text = (code or '').strip().lstrip("'\"")
         return ''.join(text.split()).upper()
+
+
+class BulkPasteLog(models.Model):
+    """Archived work-pack paste text (superuser searchable history)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='bulk_pastes',
+        help_text='Engineer whose route the paste was applied to',
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='bulk_pastes_created',
+        help_text='Account that submitted the paste',
+    )
+    job_date = models.DateField(
+        help_text='Planner day the paste was applied to',
+    )
+    raw_text = models.TextField()
+    search_text = models.TextField(
+        blank=True,
+        help_text='Lowercased refs, postcodes, addresses for search',
+    )
+    jobs_added = models.PositiveIntegerField(default=0)
+    jobs_removed = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        when = self.created_at.strftime('%Y-%m-%d %H:%M') if self.created_at else '?'
+        who = self.user.username if self.user_id else '?'
+        return f'Paste {when} · {who} ({self.jobs_added} added)'

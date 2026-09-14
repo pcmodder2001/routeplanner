@@ -584,7 +584,7 @@ def plan_current_route(user, *, unlock: bool = True) -> RoutePlan:
         Job.objects.filter(
             user=user,
             job_date=route_date,
-            status=Job.Status.DONE,
+            status__in=[Job.Status.DONE, Job.Status.MPU],
             lat__isnull=False,
         )
         .order_by('-route_order', '-id')
@@ -722,7 +722,7 @@ def apply_manual_order(user, job_ids: Sequence[int]) -> RoutePlan:
         Job.objects.filter(
             user=user,
             job_date=route_date,
-            status=Job.Status.DONE,
+            status__in=[Job.Status.DONE, Job.Status.MPU],
             lat__isnull=False,
         )
         .order_by('-id')
@@ -806,7 +806,7 @@ def next_job_navigate_url(user) -> tuple[Job | None, str]:
         Job.objects.filter(
             user=user,
             job_date=route_date,
-            status=Job.Status.DONE,
+            status__in=[Job.Status.DONE, Job.Status.MPU],
             lat__isnull=False,
         )
         .order_by('-route_order', '-id')

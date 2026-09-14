@@ -84,6 +84,9 @@
           {% if job.status == 'failed' %}
           <span class="rate-strike">{{ job.work_rate_display }}</span>
           <span class="rate-zero">£0.00</span>
+          {% elif job.status == 'mpu' %}
+          <span class="rate-strike">{{ job.work_rate_display }}</span>
+          <span class="rate-mpu">£15.00</span>
           {% elif job.work_rate_display %}
           {{ job.work_rate_display }}
           {% else %}

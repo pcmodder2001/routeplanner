@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Bulk pastes · Route Planner{% endblock %}
+
+{% block content %}
+<section class="hero-bar">
+  <div>
+    <h1>Bulk pastes</h1>
+    <p class="lede">Archived work-pack text — search by postcode, job number, address, or engineer.</p>
+  </div>
+</section>
+
+<form method="get" action="{% url 'bulk_pastes' %}" class="panel paste-search">
+  <input class="input" type="search" name="q" value="{{ q }}"
+         placeholder="e.g. HX7 8QU, MY5699295, bradford…"
+         autofocus>
+  <button type="submit" class="btn btn-primary">Search</button>
+  {% if q %}
+  <a class="btn btn-ghost" href="{% url 'bulk_pastes' %}">Clear</a>
+  {% endif %}
+</form>
+
+{% if pastes %}
+<ul class="paste-list">
+  {% for paste in pastes %}
+  <li class="paste-card">
+    <div class="paste-card-main">
+      <a class="paste-title" href="{% url 'bulk_paste_detail' paste.pk %}">
+        {{ paste.created_at|date:"D j M Y · H:i" }}
+      </a>
+      <div class="meta">
+        Engineer <strong>{{ paste.user.username }}</strong>
+        · day {{ paste.job_date|date:"j M Y" }}
+        · +{{ paste.jobs_added }} job{{ paste.jobs_added|pluralize }}
+        {% if paste.jobs_removed %}· −{{ paste.jobs_removed }} removed{% endif %}
+        {% if paste.created_by and paste.created_by_id != paste.user_id %}
+        · by {{ paste.created_by.username }}
+        {% endif %}
+      </div>
+      <pre class="paste-preview">{{ paste.raw_text|truncatechars:220 }}</pre>
+    </div>
+    <a class="btn btn-ghost btn-tiny" href="{% url 'bulk_paste_detail' paste.pk %}">Open</a>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty panel">
+  {% if q %}
+  <p>No pastes matched “{{ q }}”.</p>
+  {% else %}
+  <p>No bulk pastes saved yet. They appear after a bulk paste is confirmed.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

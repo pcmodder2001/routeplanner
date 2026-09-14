@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import DayRoute, EngineerSettings, Job, VanKitItem
+from .models import BulkPasteLog, DayRoute, EngineerSettings, Job, VanKitItem
 
 
 @admin.register(Job)
@@ -55,3 +55,19 @@ class VanKitItemAdmin(admin.ModelAdmin):
     list_filter = ('ordered',)
     search_fields = ('product_code', 'name', 'notes')
     list_editable = ('ordered', 'sort_order')
+
+
+@admin.register(BulkPasteLog)
+class BulkPasteLogAdmin(admin.ModelAdmin):
+    list_display = (
+        'created_at',
+        'user',
+        'created_by',
+        'job_date',
+        'jobs_added',
+        'jobs_removed',
+    )
+    list_filter = ('job_date', 'user')
+    search_fields = ('raw_text', 'search_text', 'user__username')
+    raw_id_fields = ('user', 'created_by')
+    readonly_fields = ('created_at', 'search_text')

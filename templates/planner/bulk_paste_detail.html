@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Paste {{ paste.created_at|date:"j M Y H:i" }} · Route Planner{% endblock %}
+
+{% block content %}
+<section class="hero-bar">
+  <div>
+    <h1>Bulk paste</h1>
+    <p class="lede">
+      Entered {{ paste.created_at|date:"D j M Y · H:i" }}
+      · engineer <strong>{{ paste.user.username }}</strong>
+      · planner day {{ paste.job_date|date:"j M Y" }}
+    </p>
+  </div>
+  <a class="btn btn-ghost" href="{% url 'bulk_pastes' %}{% if request.GET.q %}?q={{ request.GET.q|urlencode }}{% endif %}">← All pastes</a>
+</section>
+
+<div class="panel paste-meta-bar">
+  <span>+{{ paste.jobs_added }} added</span>
+  {% if paste.jobs_removed %}<span>−{{ paste.jobs_removed }} removed</span>{% endif %}
+  {% if paste.created_by %}<span>Submitted by {{ paste.created_by.username }}</span>{% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Raw paste</h2>
+    <button type="button" class="btn-copy" id="copy-paste-raw" data-copy="">Copy all</button>
+  </div>
+  <pre class="paste-raw" id="paste-raw-text">{{ paste.raw_text }}</pre>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const btn = document.getElementById('copy-paste-raw');
+  const pre = document.getElementById('paste-raw-text');
+  if (!btn || !pre) return;
+  btn.setAttribute('data-copy', pre.textContent || '');
+  btn.addEventListener('click', function () {
+    const text = pre.textContent || '';
+    const done = function () {
+      const prev = btn.textContent;
+      btn.textContent = 'Copied';
+      btn.classList.add('copied');
+      setTimeout(function () {
+        btn.textContent = prev;
+        btn.classList.remove('copied');
+      }, 1000);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        window.prompt('Copy:', text);
+      });
+    } else {
+      window.prompt('Copy:', text);
+    }
+  });
+})();
+</script>
+{% endblock %}

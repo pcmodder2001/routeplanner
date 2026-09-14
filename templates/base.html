@@ -28,6 +28,7 @@
         <a href="{% url 'earnings' %}">Earnings</a>
         <a href="{% url 'settings' %}">Start point</a>
         {% if user.is_superuser %}<a href="{% url 'engineers' %}">Engineers</a>{% endif %}
+        {% if user.is_superuser %}<a href="{% url 'bulk_pastes' %}">Pastes</a>{% endif %}
         {% if user.is_superuser %}<a href="{% url 'van_kit' %}">Van kit</a>{% endif %}
         {% if user.is_staff %}<a href="/admin/">Admin</a>{% endif %}
         <span class="nav-user">{{ user.username }}</span>

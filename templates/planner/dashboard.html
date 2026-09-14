@@ -135,6 +135,8 @@
             <span class="order-num done" title="Was stop {{ job.route_order }}">{{ job.route_order }}</span>
             {% elif job.status == 'failed' %}
             <span class="order-num skipped" title="Failed stop {{ job.route_order }}">{{ job.route_order }}</span>
+            {% elif job.status == 'mpu' %}
+            <span class="order-num done" title="MPU stop {{ job.route_order }}">{{ job.route_order }}</span>
             {% elif job.status == 'skipped' %}
             <span class="order-num skipped" title="Was stop {{ job.route_order }}">{{ job.route_order }}</span>
             {% else %}
@@ -142,6 +144,8 @@
             {% endif %}
           {% elif job.status == 'done' %}
           <span class="order-num done">✓</span>
+          {% elif job.status == 'mpu' %}
+          <span class="order-num done">M</span>
           {% elif job.status == 'failed' %}
           <span class="order-num skipped">✕</span>
           {% elif job.status == 'skipped' %}
@@ -166,11 +170,14 @@
                     aria-label="Copy address">Copy</button>
             <span class="tag tag-{{ job.appointment_type }}">{{ job.appointment_short }}</span>
             {% if job.work_type %}
-            <span class="tag tag-work tag-{{ job.work_type }} {% if job.status == 'failed' %}is-failed-rate{% endif %}">
+            <span class="tag tag-work tag-{{ job.work_type }} {% if job.status == 'failed' %}is-failed-rate{% elif job.status == 'mpu' %}is-mpu-rate{% endif %}">
               {{ job.work_type_label }}
               {% if job.status == 'failed' %}
               · <span class="rate-strike">{{ job.work_rate_display }}</span>
               <span class="rate-zero">£0.00</span>
+              {% elif job.status == 'mpu' %}
+              · <span class="rate-strike">{{ job.work_rate_display }}</span>
+              <span class="rate-mpu">£15.00</span>
               {% elif job.work_rate_display %}
               · {{ job.work_rate_display }}
               {% endif %}
@@ -204,6 +211,13 @@
               <input type="hidden" name="action" value="complete">
               <button type="submit" class="btn btn-tiny btn-done">Complete</button>
             </form>
+            {% if job.allows_mpu %}
+            <form method="post" action="{% url 'mark_job' job.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="mpu">
+              <button type="submit" class="btn btn-tiny btn-mpu" title="Part payment £15 (repairs only)">MPU</button>
+            </form>
+            {% endif %}
             <form method="post" action="{% url 'mark_job' job.pk %}">
               {% csrf_token %}
               <input type="hidden" name="action" value="fail">
@@ -452,7 +466,11 @@
           'Content-Type': 'application/json',
           'X-CSRFToken': csrfToken()
         },
-        body: JSON.stringify({ jobs: jobs || [], remove_ids: removeIds || [] })
+        body: JSON.stringify({
+          jobs: jobs || [],
+          remove_ids: removeIds || [],
+          raw: lastBulkRaw || ''
+        })
       })
         .then(function (r) {
           return r.json().then(function (j) {
@@ -777,13 +795,9 @@
       let colour = colours[p.type] || '#333';
       let fillOpacity = 1;
       let radius = p.type === 'START' ? 8 : 10;
-      if (p.status === 'done') {
+      if (p.status === 'done' || p.status === 'mpu' || p.status === 'failed') {
         colour = '#64748b';
         fillOpacity = 0.85;
-      } else if (p.status === 'failed') {
-        colour = '#b91c1c';
-        fillOpacity = 0.75;
-        radius = 8;
       } else if (p.status === 'skipped') {
         colour = '#94a3b8';
         fillOpacity = 0.7;
@@ -801,8 +815,9 @@
         title = p.label;
       } else {
         const statusBit = p.status === 'done' ? ' · Complete'
+          : (p.status === 'mpu' ? ' · MPU'
           : (p.status === 'failed' ? ' · Failed'
-          : (p.status === 'skipped' ? ' · Skipped' : ''));
+          : (p.status === 'skipped' ? ' · Skipped' : '')));
         title = '#' + (p.order || '?') + ' · ' + p.label + ' (' + p.type + ')' + statusBit;
       }
       marker.bindPopup(title);
