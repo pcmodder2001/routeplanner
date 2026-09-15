@@ -13,6 +13,7 @@ _JIN_SPLIT = re.compile(r'(?=Jin\s*no\s*:)', re.IGNORECASE)
 _FIELD = {
     'jin': re.compile(r'Jin\s*no\s*:\s*(.+)', re.IGNORECASE),
     'slot': re.compile(r'Time\s*slot\s*:\s*(.+)', re.IGNORECASE),
+    'job_type': re.compile(r'JobType\s*:\s*(.+)', re.IGNORECASE),
     'address': re.compile(r'Address\s*:\s*(.+)', re.IGNORECASE),
     'postcode': re.compile(r'Postcode\s*:\s*(.+)', re.IGNORECASE),
     'task_description': re.compile(r'Task\s*Description\s*:\s*(.+)', re.IGNORECASE),
@@ -73,13 +74,18 @@ def parse_time_slot(raw: str) -> str:
     return Job.AppointmentType.ALLDAY
 
 
-def parse_work_type(task_description: str, task_name: str = '') -> dict[str, Any]:
+def parse_work_type(
+    task_description: str,
+    task_name: str = '',
+    job_type: str = '',
+) -> dict[str, Any]:
     """
     Classify Openreach task text into a work type + pay rate.
 
-    Priority: self install → managed install → copper / OGEA / SOGEA repair.
+    Priority: self install → managed install → copper / FTTC·OGEA / SOGEA repair.
+    FTTC fault / FTTCT2R counts as OGEA repair (£30).
     """
-    blob = f'{task_description or ""} {task_name or ""}'.upper()
+    blob = f'{task_description or ""} {task_name or ""} {job_type or ""}'.upper()
     blob = blob.replace('|', ' ')
     blob = re.sub(r'\s+', ' ', blob).strip()
 
@@ -106,6 +112,9 @@ def parse_work_type(task_description: str, task_name: str = '') -> dict[str, Any
         return result(Job.WorkType.COPPER_REPAIR)
     if 'COPPER' in blob:
         return result(Job.WorkType.COPPER_REPAIR)
+    # FTTCFault / FTTC fault / FTTCT2R — same pay band as OGEA repair
+    if 'FTTC' in blob:
+        return result(Job.WorkType.OGEA_REPAIR)
     # OGEA without a leading S (so SOGEA does not match)
     if re.search(r'(?<!S)OGEA', blob):
         return result(Job.WorkType.OGEA_REPAIR)
@@ -320,7 +329,8 @@ def parse_job_block(block: str) -> dict[str, Any] | None:
     location = build_location(address, postcode)
     task_description = _first_match(_FIELD['task_description'], block)
     task_name = _first_match(_FIELD['task_name'], block)
-    work = parse_work_type(task_description, task_name)
+    job_type = _first_match(_FIELD['job_type'], block)
+    work = parse_work_type(task_description, task_name, job_type)
 
     errors: list[str] = []
     if not reference:

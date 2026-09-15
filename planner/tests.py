@@ -146,3 +146,15 @@ class BulkParseTests(SimpleTestCase):
             parse_work_type('SOGEA self install')['rate'],
             '11.50',
         )
+        self.assertEqual(
+            parse_work_type('FTTCFault is at the customer end', 'FTTCT2R')['work_type'],
+            Job.WorkType.OGEA_REPAIR,
+        )
+        self.assertEqual(
+            parse_work_type('FTTC fault at PCP', job_type='FTTCT2R')['work_type'],
+            Job.WorkType.OGEA_REPAIR,
+        )
+        self.assertEqual(
+            parse_work_type('FTTCFault is at the customer end', 'FTTCT2R')['rate'],
+            '30.00',
+        )
