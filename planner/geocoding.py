@@ -22,7 +22,7 @@ UK_POSTCODE_FIND_RE = re.compile(
     re.IGNORECASE,
 )
 
-USER_AGENT = 'OpenreachRoutePlanner/1.0 (local engineer tool)'
+USER_AGENT = 'RoutePlanner/1.0 (local engineer tool)'
 _last_nominatim_call = 0.0
 
 

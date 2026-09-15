@@ -1,5 +1,5 @@
 """
-Constrained route optimiser for Openreach-style appointments.
+Constrained route optimiser for day appointments (AM / PM / all-day).
 
 Rules:
 - AM jobs (8am–1pm) come before PM jobs (1pm–6pm)

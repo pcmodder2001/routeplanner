@@ -1,5 +1,5 @@
 """
-Django settings for Openreach Route Planner.
+Django settings for Route Planner.
 """
 
 import os

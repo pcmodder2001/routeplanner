@@ -1,4 +1,4 @@
-"""Parse Openreach / work-pack paste blocks into job fields."""
+"""Parse work-pack paste blocks into job fields."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def parse_work_type(
     job_type: str = '',
 ) -> dict[str, Any]:
     """
-    Classify Openreach task text into a work type + pay rate.
+    Classify task text into a work type + pay rate.
 
     Priority: self install → managed install → copper / FTTC·OGEA / SOGEA repair.
     FTTC fault / FTTCT2R counts as OGEA repair (£30).

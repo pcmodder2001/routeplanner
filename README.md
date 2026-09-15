@@ -1,6 +1,6 @@
-# Openreach Route Planner
+# Route Planner
 
-Local Django app for planning a day's Openreach jobs with AM / PM / all-day appointment windows.
+Local Django app for planning a day's jobs with AM / PM / all-day appointment windows.
 
 ## Features
 
