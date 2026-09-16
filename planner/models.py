@@ -321,6 +321,7 @@ class AuditLog(models.Model):
         JOB_FAILED = 'job_failed', 'Job failed'
         JOB_SKIPPED = 'job_skipped', 'Job skipped'
         JOB_REOPENED = 'job_reopened', 'Job reopened'
+        JOB_EDIT = 'job_edit', 'Job edit'
         UPDATE_APPOINTMENT = 'update_appointment', 'Update appointment'
         UPDATE_NOTES = 'update_notes', 'Update notes'
         SETTINGS_UPDATE = 'settings_update', 'Settings update'

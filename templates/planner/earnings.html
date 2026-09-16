@@ -52,9 +52,14 @@
 
 {% if days %}
 {% for day in days %}
-<div class="panel earnings-day">
-  <div class="earnings-day-head">
-    <h2>{{ day.date|date:"D j M Y" }}</h2>
+<details class="panel earnings-day">
+  <summary class="earnings-day-head">
+    <div class="earnings-day-title">
+      <h2>{{ day.date|date:"D j M Y" }}</h2>
+      <span class="earnings-day-jobs">
+        {{ day.job_count }} job{{ day.job_count|pluralize }}
+      </span>
+    </div>
     <div class="earnings-day-totals">
       <span>Projected {{ day.projected_display }}</span>
       <span class="earn-ok">Earned {{ day.earned_display }}</span>
@@ -62,42 +67,44 @@
       <span class="earn-fail">Failed −{{ day.forfeited_display }}</span>
       {% endif %}
     </div>
+  </summary>
+  <div class="earnings-day-body">
+    <table class="earnings-table">
+      <thead>
+        <tr>
+          <th>Ref</th>
+          <th>Address</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in day.jobs %}
+        <tr class="status-{{ job.status }}">
+          <td><code>{{ job.reference|default:"—" }}</code></td>
+          <td>{{ job.geocode_display|default:job.location }}</td>
+          <td>{{ job.work_type_label|default:"—" }}</td>
+          <td>{{ job.get_status_display }}</td>
+          <td>
+            {% if job.status == 'failed' %}
+            <span class="rate-strike">{{ job.work_rate_display }}</span>
+            <span class="rate-zero">£0.00</span>
+            {% elif job.status == 'mpu' %}
+            <span class="rate-strike">{{ job.work_rate_display }}</span>
+            <span class="rate-mpu">£15.00</span>
+            {% elif job.work_rate_display %}
+            {{ job.work_rate_display }}
+            {% else %}
+            —
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
-  <table class="earnings-table">
-    <thead>
-      <tr>
-        <th>Ref</th>
-        <th>Address</th>
-        <th>Type</th>
-        <th>Status</th>
-        <th>Rate</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for job in day.jobs %}
-      <tr class="status-{{ job.status }}">
-        <td><code>{{ job.reference|default:"—" }}</code></td>
-        <td>{{ job.geocode_display|default:job.location }}</td>
-        <td>{{ job.work_type_label|default:"—" }}</td>
-        <td>{{ job.get_status_display }}</td>
-        <td>
-          {% if job.status == 'failed' %}
-          <span class="rate-strike">{{ job.work_rate_display }}</span>
-          <span class="rate-zero">£0.00</span>
-          {% elif job.status == 'mpu' %}
-          <span class="rate-strike">{{ job.work_rate_display }}</span>
-          <span class="rate-mpu">£15.00</span>
-          {% elif job.work_rate_display %}
-          {{ job.work_rate_display }}
-          {% else %}
-          —
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+</details>
 {% endfor %}
 {% else %}
 <div class="empty panel">

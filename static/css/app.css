@@ -690,19 +690,61 @@ a { color: var(--primary); }
   overflow: hidden;
 }
 
+.earnings-day > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.earnings-day > summary::-webkit-details-marker {
+  display: none;
+}
+
 .earnings-day-head {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+  align-items: center;
   gap: 0.5rem;
   padding: 0.85rem 1rem;
   background: #e8eee6;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid transparent;
+}
+
+.earnings-day[open] > .earnings-day-head {
+  border-bottom-color: var(--line);
+}
+
+.earnings-day-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem 0.75rem;
+  min-width: 0;
+}
+
+.earnings-day-title::before {
+  content: "▸";
+  color: var(--muted);
+  font-size: 0.85rem;
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.earnings-day[open] .earnings-day-title::before {
+  transform: rotate(90deg);
 }
 
 .earnings-day-head h2 {
   margin: 0;
   font-size: 1rem;
+}
+
+.earnings-day-jobs {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .earnings-day-totals {
@@ -711,6 +753,10 @@ a { color: var(--primary); }
   gap: 0.75rem;
   font-size: 0.88rem;
   color: var(--muted);
+}
+
+.earnings-day-body {
+  overflow-x: auto;
 }
 
 .earnings-table {
@@ -948,6 +994,18 @@ a { color: var(--primary); }
 
 .warn { color: var(--danger); font-weight: 600; }
 
+.revisit-note {
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 8px;
+  background: #fff7e6;
+  border: 1px solid #f0d9a8;
+  color: #8a5a00;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .btn-icon {
   border: none;
   background: transparent;
@@ -1155,6 +1213,27 @@ a { color: var(--primary); }
 }
 
 .bulk-warn-list {
+  margin-bottom: 0.75rem;
+}
+
+.bulk-revisit,
+.bulk-revisit-inline {
+  color: #8a5a00;
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}
+
+.bulk-revisit-inline {
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+}
+
+.bulk-revisit-list {
+  background: #fff7e6;
+  border: 1px solid #f0d9a8;
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
   margin-bottom: 0.75rem;
 }
 
@@ -1687,6 +1766,43 @@ a { color: var(--primary); }
 }
 
 .nowrap { white-space: nowrap; }
+
+.job-edit-row td {
+  background: #f3f7f1;
+  padding: 0.85rem 1rem !important;
+  border-bottom: 1px solid var(--line);
+}
+
+.job-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.job-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.65rem 0.85rem;
+}
+
+.job-edit-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.job-edit-wide {
+  grid-column: 1 / -1;
+}
+
+.job-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
 
 @media (max-width: 640px) {
   .audit-row {

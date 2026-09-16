@@ -29,14 +29,12 @@ def earned_amount(job: Job) -> Decimal:
 
 def projected_amount(job: Job) -> Decimal:
     """
-    Contribution to projected daily total.
+    What this job should have paid at full work-type rate.
 
-    Pending + complete = full rate; MPU = £15; failed/skipped = 0.
+    Ignores outcome (fail / MPU / pending) so the day total is the pack value.
     """
-    if job.status in (Job.Status.FAILED, Job.Status.SKIPPED):
+    if job.status == Job.Status.SKIPPED:
         return ZERO
-    if job.status == Job.Status.MPU:
-        return Job.MPU_RATE
     return nominal_rate(job)
 
 

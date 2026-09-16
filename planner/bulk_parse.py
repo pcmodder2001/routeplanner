@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 from typing import Any
 
 from .models import Job
@@ -227,6 +228,106 @@ def find_duplicate_postcode_jobs(user, location: str, *, exclude_id: int | None 
     return pc, matches
 
 
+REVISIT_DAYS = 30
+
+# Counts as having attended / been to that postcode
+_ATTENDED_STATUSES = (
+    Job.Status.DONE,
+    Job.Status.MPU,
+    Job.Status.FAILED,
+    Job.Status.PENDING,
+)
+
+
+def format_revisit_note(visits: list[dict[str, Any]], *, today=None) -> str:
+    """Human note for the most recent prior visit at a postcode."""
+    if not visits:
+        return ''
+    from .planner_day import planner_today
+
+    today = today or planner_today()
+    latest = visits[0]
+    day = latest.get('date')
+    if not day:
+        return ''
+    ago = (today - day).days
+    if ago <= 0:
+        when = 'today'
+    elif ago == 1:
+        when = 'yesterday'
+    else:
+        when = f'{ago} days ago'
+    status = latest.get('status_label') or latest.get('status') or ''
+    ref = (latest.get('reference') or '').strip()
+    bits = [f'Attended {when}']
+    if status:
+        bits.append(str(status))
+    if ref:
+        bits.append(ref)
+    return ' · '.join(bits)
+
+
+def recent_postcode_visits(
+    user,
+    *,
+    within_days: int = REVISIT_DAYS,
+    before_date=None,
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    Map normalised postcode → prior jobs for this engineer.
+
+    Looks at the last `within_days` calendar days strictly before `before_date`
+    (default: planner today), so today's route is not counted against itself.
+    """
+    from .planner_day import planner_today
+
+    before = before_date or planner_today()
+    start = before - timedelta(days=within_days)
+    jobs = (
+        Job.objects.filter(
+            user=user,
+            job_date__gte=start,
+            job_date__lt=before,
+            status__in=_ATTENDED_STATUSES,
+        )
+        .order_by('-job_date', '-id')
+    )
+    by_pc: dict[str, list[dict[str, Any]]] = {}
+    status_labels = dict(Job.Status.choices)
+    for job in jobs:
+        pc = job_postcode(job)
+        if not pc:
+            continue
+        by_pc.setdefault(pc, []).append(
+            {
+                'id': job.id,
+                'date': job.job_date,
+                'reference': (job.reference or '').strip(),
+                'status': job.status,
+                'status_label': status_labels.get(job.status, job.status),
+                'location': job.geocode_display or job.location,
+            }
+        )
+    return by_pc
+
+
+def revisit_note_for_location(
+    user,
+    location: str,
+    *,
+    visit_map: dict[str, list[dict[str, Any]]] | None = None,
+    within_days: int = REVISIT_DAYS,
+) -> str:
+    """Return a revisit note for a free-text location, or ''."""
+    pc = extract_uk_postcode(location or '')
+    if not pc:
+        return ''
+    mapping = visit_map if visit_map is not None else recent_postcode_visits(
+        user, within_days=within_days
+    )
+    return format_revisit_note(mapping.get(pc) or [])
+
+
 def diff_bulk_against_route(parsed_jobs: list[dict[str, Any]], user) -> dict[str, Any]:
     """
     Compare pasted jobs with pending route jobs.
@@ -276,10 +377,24 @@ def diff_bulk_against_route(parsed_jobs: list[dict[str, Any]], user) -> dict[str
 
     postcode_warnings: list[dict[str, str]] = []
     warned_pcs: set[str] = set()
+    visit_map = recent_postcode_visits(user)
+    revisit_warnings: list[dict[str, str]] = []
+    seen_revisit: set[str] = set()
     for job in to_add:
         pc = normalise_postcode(job.get('postcode') or '') or extract_uk_postcode(
             job.get('location') or ''
         )
+        note = format_revisit_note(visit_map.get(pc) or []) if pc else ''
+        if note:
+            job['revisit_note'] = note
+            if pc and pc not in seen_revisit:
+                seen_revisit.add(pc)
+                revisit_warnings.append(
+                    {
+                        'postcode': pc,
+                        'message': f'{pc}: {note}',
+                    }
+                )
         if not pc or pc in warned_pcs:
             continue
         existing_at_pc = index['by_postcode'].get(pc) or []
@@ -301,6 +416,7 @@ def diff_bulk_against_route(parsed_jobs: list[dict[str, Any]], user) -> dict[str
         'already_on': already_on,
         'missing_from_paste': missing_from_paste,
         'postcode_warnings': postcode_warnings,
+        'revisit_warnings': revisit_warnings,
     }
 
 

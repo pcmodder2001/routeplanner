@@ -3,6 +3,7 @@ from django.test import SimpleTestCase
 from planner.bulk_parse import (
     build_location,
     extract_uk_postcode,
+    format_revisit_note,
     jin_to_reference,
     normalise_postcode,
     parse_bulk_jobs,
@@ -158,3 +159,21 @@ class BulkParseTests(SimpleTestCase):
             parse_work_type('FTTCFault is at the customer end', 'FTTCT2R')['rate'],
             '30.00',
         )
+
+    def test_revisit_note(self):
+        from datetime import date
+
+        note = format_revisit_note(
+            [
+                {
+                    'date': date(2026, 9, 10),
+                    'status_label': 'Complete',
+                    'reference': 'MY123',
+                }
+            ],
+            today=date(2026, 9, 16),
+        )
+        self.assertIn('6 days ago', note)
+        self.assertIn('Complete', note)
+        self.assertIn('MY123', note)
+        self.assertEqual(format_revisit_note([]), '')

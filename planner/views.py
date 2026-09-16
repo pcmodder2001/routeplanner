@@ -27,9 +27,12 @@ from .bulk_parse import (
     job_postcode,
     parse_bulk_jobs,
     parse_time_slot,
+    recent_postcode_visits,
+    revisit_note_for_location,
 )
 from .earnings import daily_breakdown, summarise_jobs
 from .forms import (
+    AdminJobEditForm,
     AppointmentTypeForm,
     JobForm,
     JobNotesForm,
@@ -340,6 +343,7 @@ def dashboard(request):
 
     route_geometry = day_route.geometry if day_route else []
     next_job, next_nav_url = next_job_navigate_url(planner)
+    visit_map = recent_postcode_visits(planner)
     job_rows = [
         {
             'job': job,
@@ -350,6 +354,11 @@ def dashboard(request):
             'notes_form': JobNotesForm(
                 instance=job,
                 prefix=f'notes-{job.pk}',
+            ),
+            'revisit_note': revisit_note_for_location(
+                planner,
+                job.geocode_display or job.location,
+                visit_map=visit_map,
             ),
         }
         for job in display_jobs
@@ -478,6 +487,12 @@ def add_job(request):
                 f'{dup_pc} job already on route.',
             )
 
+        revisit = revisit_note_for_location(
+            planner, job.geocode_display or job.location
+        )
+        if revisit:
+            messages.info(request, f'{job_postcode(job) or "Postcode"}: {revisit}')
+
         job.status = Job.Status.PENDING
         job.route_order = None
         job.job_date = planner_today()
@@ -530,6 +545,7 @@ def _job_payload(j: dict) -> dict:
         'work_type': j.get('work_type') or '',
         'work_type_label': j.get('work_type_label') or '',
         'rate': j.get('rate') or '',
+        'revisit_note': j.get('revisit_note') or '',
     }
 
 
@@ -603,6 +619,7 @@ def bulk_add_preview(request):
             ],
             'missing_from_paste': diff['missing_from_paste'],
             'postcode_warnings': diff['postcode_warnings'],
+            'revisit_warnings': diff.get('revisit_warnings') or [],
             'invalid': [
                 {
                     'jin': j.get('jin') or '',
@@ -1277,6 +1294,11 @@ def jobs_all(request):
         for value, label in Job.Status.choices
     ]
 
+    edit_forms = {}
+    if is_super:
+        for j in jobs:
+            j.edit_form = AdminJobEditForm(instance=j)
+
     return render(
         request,
         'planner/jobs_all.html',
@@ -1294,8 +1316,81 @@ def jobs_all(request):
             'engineer_id': str(selected_engineer.pk) if selected_engineer else '',
             'total': total,
             'shown': len(jobs),
+            'next_query': request.GET.urlencode(),
         },
     )
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_POST
+def job_admin_edit(request, pk: int):
+    """Superuser inline edit from the all-jobs page."""
+    job = get_object_or_404(Job.objects.select_related('user'), pk=pk)
+    form = AdminJobEditForm(request.POST, instance=job)
+    next_url = request.POST.get('next') or reverse('jobs_all')
+    if not next_url.startswith('/'):
+        next_url = reverse('jobs_all')
+
+    if not form.is_valid():
+        for field, errors in form.errors.items():
+            for err in errors:
+                messages.error(request, f'{field}: {err}')
+        return redirect(next_url)
+
+    before = {
+        'user_id': job.user_id,
+        'job_date': str(job.job_date) if job.job_date else '',
+        'reference': job.reference,
+        'location': job.location,
+        'appointment_type': job.appointment_type,
+        'work_type': job.work_type,
+        'status': job.status,
+        'notes': job.notes,
+    }
+    old_location = job.location
+    job = form.save(commit=False)
+
+    if job.location != old_location:
+        result = geocode_location(job.location)
+        if result:
+            job.lat = result['lat']
+            job.lng = result['lng']
+            job.geocode_display = result['display'][:255]
+        else:
+            job.lat = None
+            job.lng = None
+            job.geocode_display = ''
+            messages.warning(
+                request,
+                'Saved, but could not geocode the new address.',
+            )
+
+    job.save()
+    after = {
+        'user_id': job.user_id,
+        'job_date': str(job.job_date) if job.job_date else '',
+        'reference': job.reference,
+        'location': job.location,
+        'appointment_type': job.appointment_type,
+        'work_type': job.work_type,
+        'status': job.status,
+        'notes': job.notes,
+    }
+    changed = {k: {'from': before[k], 'to': after[k]} for k in before if before[k] != after[k]}
+    log_audit(
+        request,
+        AuditLog.Action.JOB_EDIT,
+        message=f'Edited job {job.reference or job.pk}: {job.geocode_display or job.location}',
+        subject=job.user,
+        job=job,
+        details={'changed': changed},
+    )
+    messages.success(
+        request,
+        f'Saved {job.reference or job.pk} — {job.geocode_display or job.location}',
+    )
+    return redirect(next_url)
 
 
 @login_required

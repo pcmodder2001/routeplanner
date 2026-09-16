@@ -203,6 +203,11 @@
             {% if job.status == 'pending' and job.leg_miles_from_previous != None %}<span>{{ job.leg_miles_from_previous }} mi</span>{% endif %}
             {% if not job.is_geocoded %}<span class="warn">Not located</span>{% endif %}
           </div>
+          {% if row.revisit_note %}
+          <div class="revisit-note" title="Same postcode in the last 30 days">
+            {{ row.revisit_note }}
+          </div>
+          {% endif %}
 
           {% if job.status == 'pending' %}
           <div class="job-toolbar">
@@ -402,7 +407,10 @@
               return '<td>' + escapeHtml(label) + rate + '</td>';
             }
             if (c === 'loc') {
-              return '<td class="bulk-loc">' + escapeHtml(j.location || j.existing_location || '') + '</td>';
+              const note = j.revisit_note
+                ? ('<div class="bulk-revisit-inline">' + escapeHtml(j.revisit_note) + '</div>')
+                : '';
+              return '<td class="bulk-loc">' + escapeHtml(j.location || j.existing_location || '') + note + '</td>';
             }
             return '';
           }).join('')
@@ -419,12 +427,21 @@
       const already = data.already_on || [];
       const missing = data.missing_from_paste || [];
       const warns = data.postcode_warnings || [];
+      const revisits = data.revisit_warnings || [];
       let html = '';
 
       if (warns.length) {
         html += '<div class="bulk-warn-list">'
           + warns.map(function (w) {
             return '<p class="bulk-warn">' + escapeHtml(w.message || (w.postcode + ' job already on route')) + '</p>';
+          }).join('')
+          + '</div>';
+      }
+
+      if (revisits.length) {
+        html += '<div class="bulk-warn-list bulk-revisit-list">'
+          + revisits.map(function (w) {
+            return '<p class="bulk-revisit">' + escapeHtml(w.message || '') + '</p>';
           }).join('')
           + '</div>';
       }

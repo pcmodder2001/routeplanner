@@ -7,7 +7,7 @@
     <h1>All jobs</h1>
     <p class="lede">
       {% if is_super %}
-      Every job in the system — filter by status, engineer, date, or search.
+      Every job in the system — filter by status, engineer, date, or search. Open a row to edit.
       {% else %}
       Your jobs across every day — pending, complete, failed, MPU, and more.
       {% endif %}
@@ -67,6 +67,7 @@
         <th>Type</th>
         <th>Status</th>
         <th>Rate</th>
+        {% if is_super %}<th></th>{% endif %}
       </tr>
     </thead>
     <tbody>
@@ -93,7 +94,38 @@
           {{ job.effective_rate_display|default:"—" }}
           {% endif %}
         </td>
+        {% if is_super %}
+        <td class="nowrap">
+          <button type="button" class="btn btn-ghost btn-tiny job-edit-toggle"
+                  data-target="job-edit-{{ job.pk }}" aria-expanded="false">Edit</button>
+        </td>
+        {% endif %}
       </tr>
+      {% if is_super and job.edit_form %}
+      <tr id="job-edit-{{ job.pk }}" class="job-edit-row" hidden>
+        <td colspan="9">
+          <form method="post" action="{% url 'job_admin_edit' job.pk %}" class="job-edit-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'jobs_all' %}{% if next_query %}?{{ next_query }}{% endif %}">
+            <div class="job-edit-grid">
+              <label>Engineer {{ job.edit_form.user }}</label>
+              <label>Date {{ job.edit_form.job_date }}</label>
+              <label>Ref {{ job.edit_form.reference }}</label>
+              <label>Slot {{ job.edit_form.appointment_type }}</label>
+              <label>Work type {{ job.edit_form.work_type }}</label>
+              <label>Status {{ job.edit_form.status }}</label>
+              <label class="job-edit-wide">Address {{ job.edit_form.location }}</label>
+              <label class="job-edit-wide">Notes {{ job.edit_form.notes }}</label>
+            </div>
+            <div class="job-edit-actions">
+              <button type="submit" class="btn btn-primary btn-tiny">Save</button>
+              <button type="button" class="btn btn-ghost btn-tiny job-edit-cancel"
+                      data-target="job-edit-{{ job.pk }}">Cancel</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>
@@ -106,5 +138,33 @@
   <p>No jobs yet.</p>
   {% endif %}
 </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if is_super %}
+<script>
+document.querySelectorAll('.job-edit-toggle, .job-edit-cancel').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const id = btn.getAttribute('data-target');
+    const row = document.getElementById(id);
+    if (!row) return;
+    const closing = btn.classList.contains('job-edit-cancel') || !row.hasAttribute('hidden');
+    document.querySelectorAll('.job-edit-row').forEach((r) => r.setAttribute('hidden', ''));
+    document.querySelectorAll('.job-edit-toggle').forEach((t) => {
+      t.setAttribute('aria-expanded', 'false');
+      t.textContent = 'Edit';
+    });
+    if (!closing) {
+      row.removeAttribute('hidden');
+      const toggle = document.querySelector(`.job-edit-toggle[data-target="${id}"]`);
+      if (toggle) {
+        toggle.setAttribute('aria-expanded', 'true');
+        toggle.textContent = 'Close';
+      }
+    }
+  });
+});
+</script>
 {% endif %}
 {% endblock %}

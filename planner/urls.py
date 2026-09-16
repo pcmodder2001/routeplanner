@@ -18,6 +18,7 @@ urlpatterns = [
     path('van-kit/reset-ordered/', views.van_kit_reset_ordered, name='van_kit_reset_ordered'),
     path('', views.dashboard, name='dashboard'),
     path('jobs/', views.jobs_all, name='jobs_all'),
+    path('jobs/<int:pk>/admin-edit/', views.job_admin_edit, name='job_admin_edit'),
     path('jobs/add/', views.add_job, name='add_job'),
     path('jobs/bulk/preview/', views.bulk_add_preview, name='bulk_add_preview'),
     path('jobs/bulk/confirm/', views.bulk_add_confirm, name='bulk_add_confirm'),

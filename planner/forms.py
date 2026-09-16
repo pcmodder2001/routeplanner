@@ -160,6 +160,85 @@ class JobNotesForm(forms.ModelForm):
         }
 
 
+class AdminJobEditForm(forms.ModelForm):
+    """Superuser edit of any job from the all-jobs page."""
+
+    class Meta:
+        model = Job
+        fields = [
+            'user',
+            'job_date',
+            'reference',
+            'location',
+            'appointment_type',
+            'work_type',
+            'status',
+            'notes',
+        ]
+        widgets = {
+            'user': forms.Select(attrs={'class': 'input input-compact'}),
+            'job_date': forms.DateInput(
+                format='%Y-%m-%d',
+                attrs={'class': 'input input-compact', 'type': 'date'},
+            ),
+            'reference': forms.TextInput(
+                attrs={'class': 'input input-compact', 'placeholder': 'Ref'}
+            ),
+            'location': forms.TextInput(
+                attrs={
+                    'class': 'input',
+                    'placeholder': 'Address / postcode',
+                }
+            ),
+            'appointment_type': forms.Select(
+                attrs={'class': 'input input-compact'}
+            ),
+            'work_type': forms.Select(attrs={'class': 'input input-compact'}),
+            'status': forms.Select(attrs={'class': 'input input-compact'}),
+            'notes': forms.Textarea(
+                attrs={
+                    'class': 'input',
+                    'rows': 2,
+                    'placeholder': 'Notes',
+                }
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['user'].queryset = User.objects.filter(is_active=True).order_by(
+            'username'
+        )
+        self.fields['user'].required = True
+        self.fields['job_date'].input_formats = ['%Y-%m-%d']
+        self.fields['work_type'].required = False
+        self.fields['work_type'].choices = [('', '—')] + list(
+            Job.WorkType.choices
+        )
+        self.fields['notes'].required = False
+        self.fields['reference'].required = False
+
+    def clean_location(self):
+        return (self.cleaned_data.get('location') or '').strip()
+
+    def clean(self):
+        cleaned = super().clean()
+        status = cleaned.get('status')
+        work_type = cleaned.get('work_type') or ''
+        if status == Job.Status.MPU:
+            allows = work_type in (
+                Job.WorkType.SOGEA_REPAIR,
+                Job.WorkType.OGEA_REPAIR,
+                Job.WorkType.COPPER_REPAIR,
+            )
+            if not allows:
+                self.add_error(
+                    'status',
+                    'MPU is only for repair work types (SOGEA / OGEA / copper).',
+                )
+        return cleaned
+
+
 class VanKitItemForm(forms.ModelForm):
     class Meta:
         model = VanKitItem
