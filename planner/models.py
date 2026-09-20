@@ -73,7 +73,7 @@ class Job(models.Model):
         COPPER_REPAIR = 'copper_repair', 'Copper repair'
 
     WORK_TYPE_RATES = {
-        WorkType.MANAGED_INSTALL: Decimal('22.50'),
+        WorkType.MANAGED_INSTALL: Decimal('42.00'),
         WorkType.SELF_INSTALL: Decimal('11.50'),
         WorkType.SOGEA_REPAIR: Decimal('30.00'),
         WorkType.OGEA_REPAIR: Decimal('30.00'),

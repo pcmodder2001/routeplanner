@@ -118,7 +118,7 @@ class BulkParseTests(SimpleTestCase):
         self.assertEqual(b['appointment_type'], Job.AppointmentType.PM)
         self.assertIn('OULTON TERRACE', b['location'])
         self.assertEqual(b['work_type'], Job.WorkType.MANAGED_INSTALL)
-        self.assertEqual(b['rate'], '22.50')
+        self.assertEqual(b['rate'], '42.00')
 
     def test_work_types(self):
         self.assertEqual(
