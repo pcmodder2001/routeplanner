@@ -76,6 +76,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'planner.context_processors.view_as_context',
+                'planner.context_processors.unresolved_jobs_context',
             ],
         },
     },

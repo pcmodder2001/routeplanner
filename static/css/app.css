@@ -1816,4 +1816,125 @@ a { color: var(--primary); }
   }
 }
 
+body.closeout-locked {
+  overflow: hidden;
+}
+
+body.closeout-locked .topbar,
+body.closeout-locked .page,
+body.closeout-locked .view-as-bar,
+body.closeout-locked .flash-wrap {
+  pointer-events: none;
+  user-select: none;
+  filter: grayscale(0.15);
+}
+
+body.closeout-locked .nav-logout,
+body.closeout-locked .nav-logout button {
+  pointer-events: auto;
+  filter: none;
+}
+
+.closeout-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(18, 28, 20, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+.closeout-panel {
+  width: min(100%, 34rem);
+  max-height: min(90vh, 44rem);
+  overflow: auto;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 48px rgba(20, 30, 20, 0.28);
+  padding: 1.15rem 1.2rem 1.25rem;
+}
+
+.closeout-panel h2 {
+  margin: 0 0 0.4rem;
+  font-size: 1.25rem;
+}
+
+.closeout-lede {
+  margin: 0 0 0.85rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.closeout-error {
+  margin: 0 0 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.closeout-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.closeout-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7faf6;
+}
+
+.closeout-item.is-busy {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.closeout-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.closeout-ref {
+  display: inline-block;
+  margin-bottom: 0.15rem;
+  font-size: 0.82rem;
+}
+
+.closeout-loc {
+  display: block;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.closeout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.closeout-logout {
+  margin: 1rem 0 0;
+  text-align: center;
+}
+
+
 

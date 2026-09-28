@@ -29,6 +29,7 @@ urlpatterns = [
     path('jobs/<int:pk>/appointment/', views.update_appointment, name='update_appointment'),
     path('jobs/<int:pk>/notes/', views.update_notes, name='update_notes'),
     path('jobs/<int:pk>/mark/', views.mark_job, name='mark_job'),
+    path('jobs/<int:pk>/mark-previous/', views.mark_previous_job, name='mark_previous_job'),
     path('jobs/reorder/', views.reorder_jobs, name='reorder_jobs'),
     path('places/autocomplete/', views.places_autocomplete, name='places_autocomplete'),
     path('places/details/', views.place_details, name='place_details'),

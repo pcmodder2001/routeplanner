@@ -58,6 +58,7 @@ from .planner_day import (
     format_planner_day,
     is_rolled_to_tomorrow,
     planner_today,
+    unresolved_previous_jobs,
     week_bounds,
 )
 from .routing import (
@@ -906,6 +907,16 @@ def mark_job(request, pk):
     planner = active_user(request)
     job = _user_job(request, pk)
     action = request.POST.get('action', '')
+    ok, error = _apply_job_mark(request, planner, job, action)
+    if not ok:
+        messages.error(request, error or 'Unknown action.')
+    return redirect('dashboard')
+
+
+def _apply_job_mark(
+    request, planner, job, action: str, *, flash: bool = True
+) -> tuple[bool, str]:
+    """Apply complete / mpu / fail / skip / reopen. Returns (ok, error_message)."""
     if action in ('done', 'complete'):
         set_job_status(job, Job.Status.DONE)
         log_audit(
@@ -916,34 +927,34 @@ def mark_job(request, pk):
             job=job,
             details={'reference': job.reference, 'work_type': job.work_type},
         )
-        messages.success(
-            request, f'Completed: {job.geocode_display or job.location}'
-        )
-    elif action == 'mpu':
+        if flash:
+            messages.success(
+                request, f'Completed: {job.geocode_display or job.location}'
+            )
+        return True, ''
+    if action == 'mpu':
         if not job.allows_mpu:
-            messages.error(
-                request,
-                'MPU is only for repair jobs (SOGEA / OGEA / copper), not installs.',
-            )
-        else:
-            set_job_status(job, Job.Status.MPU)
-            log_audit(
-                request,
-                AuditLog.Action.JOB_MPU,
-                message=f'MPU {job.geocode_display or job.location} (£{Job.MPU_RATE:.2f})',
-                subject=planner,
-                job=job,
-                details={
-                    'reference': job.reference,
-                    'work_type': job.work_type,
-                    'rate': str(Job.MPU_RATE),
-                },
-            )
+            return False, 'MPU is only for repair jobs (SOGEA / OGEA / copper), not installs.'
+        set_job_status(job, Job.Status.MPU)
+        log_audit(
+            request,
+            AuditLog.Action.JOB_MPU,
+            message=f'MPU {job.geocode_display or job.location} (£{Job.MPU_RATE:.2f})',
+            subject=planner,
+            job=job,
+            details={
+                'reference': job.reference,
+                'work_type': job.work_type,
+                'rate': str(Job.MPU_RATE),
+            },
+        )
+        if flash:
             messages.success(
                 request,
                 f'MPU: {job.geocode_display or job.location} — £{Job.MPU_RATE:.2f}',
             )
-    elif action == 'fail':
+        return True, ''
+    if action == 'fail':
         set_job_status(job, Job.Status.FAILED)
         log_audit(
             request,
@@ -953,11 +964,13 @@ def mark_job(request, pk):
             job=job,
             details={'reference': job.reference, 'work_type': job.work_type},
         )
-        messages.info(
-            request,
-            f'Failed: {job.geocode_display or job.location} — £0 on earnings',
-        )
-    elif action == 'skip':
+        if flash:
+            messages.info(
+                request,
+                f'Failed: {job.geocode_display or job.location} — £0 on earnings',
+            )
+        return True, ''
+    if action == 'skip':
         set_job_status(job, Job.Status.SKIPPED)
         log_audit(
             request,
@@ -966,8 +979,10 @@ def mark_job(request, pk):
             subject=planner,
             job=job,
         )
-        messages.info(request, f'Skipped: {job.geocode_display or job.location}')
-    elif action == 'reopen':
+        if flash:
+            messages.info(request, f'Skipped: {job.geocode_display or job.location}')
+        return True, ''
+    if action == 'reopen':
         set_job_status(job, Job.Status.PENDING)
         log_audit(
             request,
@@ -976,11 +991,67 @@ def mark_job(request, pk):
             subject=planner,
             job=job,
         )
-        messages.info(request, 'Job reopened — re-plan if needed.')
-    else:
-        messages.error(request, 'Unknown action.')
-    return redirect('dashboard')
+        if flash:
+            messages.info(request, 'Job reopened — re-plan if needed.')
+        return True, ''
+    return False, 'Unknown action.'
 
+
+def _unresolved_job_payload(job: Job) -> dict:
+    day_label = ''
+    if job.job_date:
+        day_label = (
+            f'{job.job_date.strftime("%a")} {job.job_date.day} '
+            f'{job.job_date.strftime("%b")}'
+        )
+    return {
+        'id': job.pk,
+        'reference': job.reference or '',
+        'location': job.geocode_display or job.location,
+        'job_date': job.job_date.isoformat() if job.job_date else '',
+        'job_date_label': day_label,
+        'work_type': job.work_type or '',
+        'work_type_label': job.work_type_label or '',
+        'allows_mpu': job.allows_mpu,
+        'appointment': job.appointment_short,
+    }
+
+
+@login_required
+@require_POST
+def mark_previous_job(request, pk):
+    """JSON mark for the previous-day closeout gate (complete / fail / mpu only)."""
+    planner = active_user(request)
+    job = get_object_or_404(
+        Job,
+        pk=pk,
+        user=planner,
+        status=Job.Status.PENDING,
+        job_date__lt=planner_today(),
+    )
+    body = _json_body(request)
+    action = (body.get('action') or request.POST.get('action') or '').strip().lower()
+    if action in ('done', 'complete'):
+        action = 'complete'
+    if action not in ('complete', 'fail', 'mpu'):
+        return JsonResponse(
+            {'ok': False, 'error': 'Choose Complete, Fail, or MPU.'},
+            status=400,
+        )
+
+    ok, error = _apply_job_mark(request, planner, job, action, flash=False)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': error}, status=400)
+
+    remaining_qs = unresolved_previous_jobs(planner)
+    remaining = list(remaining_qs[:50])
+    return JsonResponse(
+        {
+            'ok': True,
+            'remaining_count': remaining_qs.count(),
+            'remaining': [_unresolved_job_payload(j) for j in remaining],
+        }
+    )
 
 @login_required
 @require_POST

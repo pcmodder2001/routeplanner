@@ -40,6 +40,33 @@ def is_rolled_to_tomorrow(now: datetime | None = None) -> bool:
     return current.hour >= DAY_ROLLOVER_HOUR
 
 
+def previous_planner_day(now: datetime | None = None) -> date:
+    """Calendar day just before the active planner day (the day being closed out)."""
+    return planner_today(now) - timedelta(days=1)
+
+
+def unresolved_previous_jobs(user, now: datetime | None = None):
+    """
+    Pending jobs from before the active planner day.
+
+    After 9pm (and any later day until cleared), engineers must mark these
+    Complete / Fail / MPU before using the planner normally.
+    """
+    from .models import Job
+
+    if user is None or not getattr(user, 'is_authenticated', False):
+        return Job.objects.none()
+    day = planner_today(now)
+    return (
+        Job.objects.filter(
+            user=user,
+            job_date__lt=day,
+            status=Job.Status.PENDING,
+        )
+        .order_by('job_date', 'route_order', 'id')
+    )
+
+
 def week_bounds(day: date) -> tuple[date, date]:
     """Monday–Sunday week containing day."""
     start = day - timedelta(days=day.weekday())

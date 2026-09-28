@@ -74,6 +74,131 @@
     {% block content %}{% endblock %}
   </main>
 
+  {% if user.is_authenticated and unresolved_previous_count %}
+  <div id="closeout-gate" class="closeout-gate" role="dialog" aria-modal="true" aria-labelledby="closeout-title">
+    <div class="closeout-panel">
+      <h2 id="closeout-title">Finish yesterday’s jobs</h2>
+      <p class="closeout-lede">
+        You have <strong id="closeout-count">{{ unresolved_previous_count }}</strong>
+        unmarked job{{ unresolved_previous_count|pluralize }} from before today’s planner day.
+        Mark each as Complete, Fail, or MPU before continuing.
+      </p>
+      <p id="closeout-error" class="closeout-error" hidden></p>
+      <ul id="closeout-list" class="closeout-list">
+        {% for job in unresolved_previous_jobs %}
+        <li class="closeout-item" data-id="{{ job.pk }}">
+          <div class="closeout-item-main">
+            <div class="closeout-meta">
+              <span>{{ job.job_date|date:"D j M" }}</span>
+              <span>{{ job.appointment_short }}</span>
+              {% if job.work_type_label %}<span>{{ job.work_type_label }}</span>{% endif %}
+            </div>
+            {% if job.reference %}<code class="closeout-ref">{{ job.reference }}</code>{% endif %}
+            <strong class="closeout-loc">{{ job.geocode_display|default:job.location }}</strong>
+          </div>
+          <div class="closeout-actions">
+            <button type="button" class="btn btn-tiny btn-done" data-action="complete">Complete</button>
+            {% if job.allows_mpu %}
+            <button type="button" class="btn btn-tiny btn-mpu" data-action="mpu">MPU</button>
+            {% endif %}
+            <button type="button" class="btn btn-tiny btn-fail" data-action="fail">Fail</button>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if unresolved_previous_count > unresolved_previous_jobs|length %}
+      <p class="meta">Showing first {{ unresolved_previous_jobs|length }} — mark these, then the rest will appear.</p>
+      {% endif %}
+      <form method="post" action="{% url 'logout' %}" class="closeout-logout">
+        {% csrf_token %}
+        <button type="submit" class="btn-link">Sign out instead</button>
+      </form>
+    </div>
+  </div>
+  <script>
+  (function () {
+    const gate = document.getElementById('closeout-gate');
+    if (!gate) return;
+    const list = document.getElementById('closeout-list');
+    const countEl = document.getElementById('closeout-count');
+    const errorEl = document.getElementById('closeout-error');
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, function (c) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+      });
+    }
+
+    function renderRemaining(jobs, count) {
+      countEl.textContent = String(count);
+      if (!count) {
+        gate.remove();
+        document.body.classList.remove('closeout-locked');
+        return;
+      }
+      list.innerHTML = jobs.map(function (job) {
+        const mpu = job.allows_mpu
+          ? '<button type="button" class="btn btn-tiny btn-mpu" data-action="mpu">MPU</button>'
+          : '';
+        return (
+          '<li class="closeout-item" data-id="' + job.id + '">'
+          + '<div class="closeout-item-main">'
+          + '<div class="closeout-meta">'
+          + '<span>' + escapeHtml(job.job_date_label) + '</span>'
+          + '<span>' + escapeHtml(job.appointment) + '</span>'
+          + (job.work_type_label ? '<span>' + escapeHtml(job.work_type_label) + '</span>' : '')
+          + '</div>'
+          + (job.reference ? '<code class="closeout-ref">' + escapeHtml(job.reference) + '</code>' : '')
+          + '<strong class="closeout-loc">' + escapeHtml(job.location) + '</strong>'
+          + '</div>'
+          + '<div class="closeout-actions">'
+          + '<button type="button" class="btn btn-tiny btn-done" data-action="complete">Complete</button>'
+          + mpu
+          + '<button type="button" class="btn btn-tiny btn-fail" data-action="fail">Fail</button>'
+          + '</div></li>'
+        );
+      }).join('');
+    }
+
+    document.body.classList.add('closeout-locked');
+
+    list.addEventListener('click', function (e) {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const item = btn.closest('.closeout-item');
+      if (!item) return;
+      const id = item.getAttribute('data-id');
+      const action = btn.getAttribute('data-action');
+      errorEl.hidden = true;
+      item.classList.add('is-busy');
+      btn.disabled = true;
+
+      fetch('{% url "mark_previous_job" 0 %}'.replace('/0/', '/' + id + '/'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify({ action: action }),
+      })
+        .then(function (r) { return r.json().then(function (j) { return { status: r.status, body: j }; }); })
+        .then(function (res) {
+          if (!res.body.ok) {
+            throw new Error(res.body.error || 'Could not update job');
+          }
+          renderRemaining(res.body.remaining || [], res.body.remaining_count || 0);
+        })
+        .catch(function (err) {
+          item.classList.remove('is-busy');
+          btn.disabled = false;
+          errorEl.textContent = (err && err.message) || 'Could not update — try again';
+          errorEl.hidden = false;
+        });
+    });
+  })();
+  </script>
+  {% endif %}
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
   document.addEventListener('click', (e) => {
