@@ -71,6 +71,7 @@ class Job(models.Model):
         SOGEA_REPAIR = 'sogea_repair', 'SOGEA repair'
         OGEA_REPAIR = 'ogea_repair', 'OGEA repair'
         COPPER_REPAIR = 'copper_repair', 'Copper repair'
+        BROADBAND_REPAIR = 'broadband_repair', 'Broadband repair'
 
     WORK_TYPE_RATES = {
         WorkType.MANAGED_INSTALL: Decimal('42.00'),
@@ -78,6 +79,7 @@ class Job(models.Model):
         WorkType.SOGEA_REPAIR: Decimal('30.00'),
         WorkType.OGEA_REPAIR: Decimal('30.00'),
         WorkType.COPPER_REPAIR: Decimal('30.00'),
+        WorkType.BROADBAND_REPAIR: Decimal('40.00'),
     }
 
     user = models.ForeignKey(
@@ -180,6 +182,7 @@ class Job(models.Model):
             self.WorkType.SOGEA_REPAIR,
             self.WorkType.OGEA_REPAIR,
             self.WorkType.COPPER_REPAIR,
+            self.WorkType.BROADBAND_REPAIR,
         )
 
     @property

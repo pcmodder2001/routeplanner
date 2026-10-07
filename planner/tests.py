@@ -159,6 +159,22 @@ class BulkParseTests(SimpleTestCase):
             parse_work_type('FTTCFault is at the customer end', 'FTTCT2R')['rate'],
             '30.00',
         )
+        broadband = parse_work_type(
+            'SOGEA repair l Visit assure',
+            task_name='BroadBandRepair',
+            job_type='BroadBandRepair',
+        )
+        self.assertEqual(broadband['work_type'], Job.WorkType.BROADBAND_REPAIR)
+        self.assertEqual(broadband['work_type_label'], 'Broadband repair')
+        self.assertEqual(broadband['rate'], '40.00')
+        self.assertEqual(
+            parse_work_type(
+                'SOGEA repair l Fault at customer end',
+                task_name='SOGEAT2R',
+                job_type='SOGEAT2R',
+            )['work_type'],
+            Job.WorkType.SOGEA_REPAIR,
+        )
 
     def test_revisit_note(self):
         from datetime import date

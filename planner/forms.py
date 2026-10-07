@@ -230,11 +230,12 @@ class AdminJobEditForm(forms.ModelForm):
                 Job.WorkType.SOGEA_REPAIR,
                 Job.WorkType.OGEA_REPAIR,
                 Job.WorkType.COPPER_REPAIR,
+                Job.WorkType.BROADBAND_REPAIR,
             )
             if not allows:
                 self.add_error(
                     'status',
-                    'MPU is only for repair work types (SOGEA / OGEA / copper).',
+                    'MPU is only for repair work types (SOGEA / OGEA / copper / broadband).',
                 )
         return cleaned
 

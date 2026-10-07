@@ -83,8 +83,11 @@ def parse_work_type(
     """
     Classify task text into a work type + pay rate.
 
-    Priority: self install → managed install → copper / FTTC·OGEA / SOGEA repair.
+    Priority: broadband repair (JobType BroadBandRepair) → self install →
+    managed install → copper / FTTC·OGEA / SOGEA repair.
     FTTC fault / FTTCT2R counts as OGEA repair (£30).
+    BroadBandRepair is checked first so "SOGEA repair" in the task text
+    does not downgrade it to the £30 SOGEA rate.
     """
     blob = f'{task_description or ""} {task_name or ""} {job_type or ""}'.upper()
     blob = blob.replace('|', ' ')
@@ -105,6 +108,10 @@ def parse_work_type(
             'rate': f'{rate:.2f}' if rate is not None else '',
         }
 
+    # JobType / Task Name BroadBandRepair (£40), even when the description
+    # also says "SOGEA repair".
+    if re.search(r'BROAD\s*BAND\s*REPAIR', blob):
+        return result(Job.WorkType.BROADBAND_REPAIR)
     if 'SELF INSTALL' in blob or 'SELF-INSTALL' in blob or 'SELFINSTALL' in blob:
         return result(Job.WorkType.SELF_INSTALL)
     if 'MANAGED INSTALL' in blob or 'MANAGEDINSTALL' in blob:

@@ -934,7 +934,7 @@ def _apply_job_mark(
         return True, ''
     if action == 'mpu':
         if not job.allows_mpu:
-            return False, 'MPU is only for repair jobs (SOGEA / OGEA / copper), not installs.'
+            return False, 'MPU is only for repair jobs (SOGEA / OGEA / copper / broadband), not installs.'
         set_job_status(job, Job.Status.MPU)
         log_audit(
             request,

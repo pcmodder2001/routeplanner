@@ -502,6 +502,7 @@ a { color: var(--primary); }
 .tag-sogea_repair,
 .tag-ogea_repair,
 .tag-copper_repair { background: #ffe4e6; color: #9f1239; }
+.tag-broadband_repair { background: #fef3c7; color: #92400e; }
 
 .meta, .meta-row, .notes {
   color: var(--muted);
