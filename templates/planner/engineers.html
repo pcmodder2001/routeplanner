@@ -18,6 +18,12 @@
       <span class="meta">
         {{ eng.pending_count }} pending
         · {{ eng.job_count }} total
+        {% if eng.fail_rate != None %}
+        · <span class="earn-fail" title="Failed ÷ non-pending jobs">{{ eng.fail_rate }}% fail</span>
+        <span class="meta">({{ eng.failed_count }}/{{ eng.decided_count }})</span>
+        {% else %}
+        · <span class="meta">no fail rate yet</span>
+        {% endif %}
         {% if eng.is_superuser %}· superuser{% endif %}
       </span>
     </div>

@@ -188,10 +188,19 @@ def logout_view(request):
 @login_required
 @user_passes_test(_superuser_required)
 def engineers_view(request):
-    engineers = list_engineers().annotate(
-        pending_count=Count('jobs', filter=Q(jobs__status=Job.Status.PENDING)),
-        job_count=Count('jobs'),
+    engineers = list(
+        list_engineers().annotate(
+            pending_count=Count('jobs', filter=Q(jobs__status=Job.Status.PENDING)),
+            failed_count=Count('jobs', filter=Q(jobs__status=Job.Status.FAILED)),
+            job_count=Count('jobs'),
+        )
     )
+    for eng in engineers:
+        decided = eng.job_count - eng.pending_count
+        eng.decided_count = decided
+        eng.fail_rate = (
+            round((eng.failed_count / decided) * 100, 1) if decided else None
+        )
     return render(
         request,
         'planner/engineers.html',
