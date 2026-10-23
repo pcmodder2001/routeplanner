@@ -117,7 +117,7 @@ class BulkParseTests(SimpleTestCase):
         self.assertEqual(b['reference'], '28745131A')
         self.assertEqual(b['appointment_type'], Job.AppointmentType.PM)
         self.assertIn('OULTON TERRACE', b['location'])
-        self.assertEqual(b['work_type'], Job.WorkType.MANAGED_INSTALL)
+        self.assertEqual(b['work_type'], Job.WorkType.MANAGED_INSTALL_JUMPERS)
         self.assertEqual(b['rate'], '42.00')
 
     def test_work_types(self):
@@ -125,12 +125,22 @@ class BulkParseTests(SimpleTestCase):
             parse_work_type('SOGEA repair l Fault at customer end')['work_type'],
             Job.WorkType.SOGEA_REPAIR,
         )
+        jumpers_required = parse_work_type(
+            'SOGEA new line provide | Jumpersrequired | Managed install | Standard'
+        )
         self.assertEqual(
-            parse_work_type(
-                'SOGEA new line provide | Jumpersrequired | Managed install | Standard'
-            )['work_type'],
+            jumpers_required['work_type'],
+            Job.WorkType.MANAGED_INSTALL_JUMPERS,
+        )
+        self.assertEqual(jumpers_required['rate'], '42.00')
+        jumpers_exist = parse_work_type(
+            'SOGEA provide | Jumpers exist | Managedinstall | Standard |LTOK'
+        )
+        self.assertEqual(
+            jumpers_exist['work_type'],
             Job.WorkType.MANAGED_INSTALL,
         )
+        self.assertEqual(jumpers_exist['rate'], '22.50')
         self.assertEqual(
             parse_work_type('OGEA repair at PCP')['work_type'],
             Job.WorkType.OGEA_REPAIR,
@@ -139,6 +149,17 @@ class BulkParseTests(SimpleTestCase):
             parse_work_type('Copper repair underground')['work_type'],
             Job.WorkType.COPPER_REPAIR,
         )
+        # "Copper fault" in a SOGEA description must stay SOGEA
+        sogea_copper_fault = parse_work_type(
+            'SOGEA repair l Copper fault btwn PCP &premises',
+            'SOGEAT2R',
+            'SOGEAT2R',
+        )
+        self.assertEqual(
+            sogea_copper_fault['work_type'],
+            Job.WorkType.SOGEA_REPAIR,
+        )
+        self.assertEqual(sogea_copper_fault['rate'], '30.00')
         self.assertEqual(
             parse_work_type('SOGEA self install')['work_type'],
             Job.WorkType.SELF_INSTALL,

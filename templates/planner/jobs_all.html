@@ -95,9 +95,14 @@
           {% endif %}
         </td>
         {% if is_super %}
-        <td class="nowrap">
+        <td class="nowrap job-row-actions">
           <button type="button" class="btn btn-ghost btn-tiny job-edit-toggle"
                   data-target="job-edit-{{ job.pk }}" aria-expanded="false">Edit</button>
+          {% if job.reference %}
+          <button type="button" class="btn btn-ghost btn-tiny job-paste-btn"
+                  data-paste-url="{% url 'job_paste_snippet' job.pk %}"
+                  data-ref="{{ job.reference }}">Paste</button>
+          {% endif %}
         </td>
         {% endif %}
       </tr>
@@ -143,6 +148,7 @@
 
 {% block scripts %}
 {% if is_super %}
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 document.querySelectorAll('.job-edit-toggle, .job-edit-cancel').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -163,6 +169,58 @@ document.querySelectorAll('.job-edit-toggle, .job-edit-cancel').forEach((btn) =>
         toggle.textContent = 'Close';
       }
     }
+  });
+});
+
+document.querySelectorAll('.job-paste-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const url = btn.getAttribute('data-paste-url');
+    const ref = btn.getAttribute('data-ref') || 'Job';
+    btn.disabled = true;
+    fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then((r) => r.json().then((j) => ({ status: r.status, body: j })))
+      .then((res) => {
+        btn.disabled = false;
+        if (!res.body.ok) {
+          Swal.fire({
+            icon: 'info',
+            title: ref,
+            text: res.body.error || 'No paste found for this job.',
+            customClass: { confirmButton: 'btn btn-primary' },
+            buttonsStyling: false,
+          });
+          return;
+        }
+        const when = res.body.paste_at
+          ? new Date(res.body.paste_at).toLocaleString()
+          : '';
+        Swal.fire({
+          title: ref,
+          html:
+            (when ? '<p class="meta" style="margin:0 0 0.5rem">From paste ' + when + '</p>' : '')
+            + '<pre class="job-paste-pre">'
+            + String(res.body.block || '').replace(/[&<>]/g, (c) =>
+                ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+            + '</pre>',
+          width: '36rem',
+          confirmButtonText: 'Close',
+          customClass: {
+            popup: 'job-paste-swal',
+            confirmButton: 'btn btn-primary',
+          },
+          buttonsStyling: false,
+        });
+      })
+      .catch(() => {
+        btn.disabled = false;
+        Swal.fire({
+          icon: 'error',
+          title: 'Could not load paste',
+          text: 'Try again',
+          customClass: { confirmButton: 'btn btn-primary' },
+          buttonsStyling: false,
+        });
+      });
   });
 });
 </script>

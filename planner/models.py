@@ -66,7 +66,10 @@ class Job(models.Model):
     MPU_RATE = Decimal('15.00')
 
     class WorkType(models.TextChoices):
+        # Jumpers exist / standard managed provide
         MANAGED_INSTALL = 'managed_install', 'Managed install'
+        # Jumpers required (new line provide) — higher rate
+        MANAGED_INSTALL_JUMPERS = 'managed_jumpers', 'Managed install (jumpers)'
         SELF_INSTALL = 'self_install', 'Self install'
         SOGEA_REPAIR = 'sogea_repair', 'SOGEA repair'
         OGEA_REPAIR = 'ogea_repair', 'OGEA repair'
@@ -74,7 +77,8 @@ class Job(models.Model):
         BROADBAND_REPAIR = 'broadband_repair', 'Broadband repair'
 
     WORK_TYPE_RATES = {
-        WorkType.MANAGED_INSTALL: Decimal('42.00'),
+        WorkType.MANAGED_INSTALL: Decimal('22.50'),
+        WorkType.MANAGED_INSTALL_JUMPERS: Decimal('42.00'),
         WorkType.SELF_INSTALL: Decimal('11.50'),
         WorkType.SOGEA_REPAIR: Decimal('30.00'),
         WorkType.OGEA_REPAIR: Decimal('30.00'),

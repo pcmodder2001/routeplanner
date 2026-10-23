@@ -24,6 +24,7 @@ from .bulk_parse import (
     diff_bulk_against_route,
     extract_uk_postcode,
     find_duplicate_postcode_jobs,
+    find_paste_block_for_job,
     job_postcode,
     parse_bulk_jobs,
     parse_time_slot,
@@ -1398,6 +1399,35 @@ def jobs_all(request):
             'shown': len(jobs),
             'next_query': request.GET.urlencode(),
         },
+    )
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_GET
+def job_paste_snippet(request, pk: int):
+    """Return the single Jin paste block for a job (from BulkPasteLog)."""
+    job = get_object_or_404(Job.objects.select_related('user'), pk=pk)
+    found = find_paste_block_for_job(job)
+    if not found:
+        return JsonResponse(
+            {
+                'ok': False,
+                'error': 'No paste found for this job reference.',
+                'reference': job.reference or '',
+            },
+            status=404,
+        )
+    paste_at = found.get('paste_at')
+    return JsonResponse(
+        {
+            'ok': True,
+            'reference': job.reference or '',
+            'block': found['block'],
+            'paste_id': found['paste_id'],
+            'paste_at': paste_at.isoformat() if paste_at else '',
+            'job_date': str(found['job_date']) if found.get('job_date') else '',
+        }
     )
 
 

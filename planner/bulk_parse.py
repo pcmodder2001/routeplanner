@@ -115,18 +115,19 @@ def parse_work_type(
     if 'SELF INSTALL' in blob or 'SELF-INSTALL' in blob or 'SELFINSTALL' in blob:
         return result(Job.WorkType.SELF_INSTALL)
     if 'MANAGED INSTALL' in blob or 'MANAGEDINSTALL' in blob:
+        # Jumpersrequired / Jumpers required → £42
+        # Jumpers exist → £22.50
+        if re.search(r'JUMPERS?\s*REQUIRED', blob) or 'JUMPERSREQUIRED' in blob:
+            return result(Job.WorkType.MANAGED_INSTALL_JUMPERS)
         return result(Job.WorkType.MANAGED_INSTALL)
-    if 'COPPER' in blob and ('REPAIR' in blob or 'FAULT' in blob):
-        return result(Job.WorkType.COPPER_REPAIR)
-    if 'COPPER' in blob:
-        return result(Job.WorkType.COPPER_REPAIR)
     # FTTCFault / FTTC fault / FTTCT2R — same pay band as OGEA repair
     if 'FTTC' in blob:
         return result(Job.WorkType.OGEA_REPAIR)
     # OGEA without a leading S (so SOGEA does not match)
     if re.search(r'(?<!S)OGEA', blob):
         return result(Job.WorkType.OGEA_REPAIR)
-    if 'SOGEA' in blob and ('REPAIR' in blob or 'FAULT' in blob):
+    # SOGEA before copper — descriptions often say "SOGEA repair … Copper fault …"
+    if 'SOGEA' in blob and ('REPAIR' in blob or 'FAULT' in blob or 'T2R' in blob):
         return result(Job.WorkType.SOGEA_REPAIR)
     if 'SOGEA' in blob and 'NEW LINE' in blob:
         # New provide without explicit managed/self — leave blank rather than guess
@@ -137,6 +138,11 @@ def parse_work_type(
         }
     if 'SOGEA' in blob:
         return result(Job.WorkType.SOGEA_REPAIR)
+    # Copper repair only when not a SOGEA/OGEA/FTTC job
+    if 'COPPER' in blob and ('REPAIR' in blob or 'FAULT' in blob):
+        return result(Job.WorkType.COPPER_REPAIR)
+    if 'COPPER' in blob:
+        return result(Job.WorkType.COPPER_REPAIR)
 
     return {
         'work_type': '',
@@ -512,3 +518,60 @@ def parse_bulk_jobs(raw: str) -> dict[str, Any]:
         'invalid': invalid,
         'count': len(jobs),
     }
+
+
+def extract_jin_block_for_reference(raw: str, reference: str) -> str:
+    """Return the Jin block for a job reference from a multi-job paste, or ''."""
+    target = normalise_reference(reference)
+    if not target:
+        return ''
+    text = (raw or '').replace('\r\n', '\n').replace('\r', '\n').strip()
+    if not text:
+        return ''
+    for part in _JIN_SPLIT.split(text):
+        parsed = parse_job_block(part)
+        if not parsed:
+            continue
+        if normalise_reference(parsed.get('reference') or '') == target:
+            return part.strip()
+    return ''
+
+
+def find_paste_block_for_job(job) -> dict[str, Any] | None:
+    """
+    Look up the newest BulkPasteLog that contains this job's reference
+    and return that single Jin block.
+    """
+    from django.db.models import Q
+
+    from .models import BulkPasteLog
+
+    ref = (job.reference or '').strip()
+    if not ref:
+        return None
+
+    qs = BulkPasteLog.objects.filter(
+        Q(raw_text__icontains=ref) | Q(search_text__icontains=ref.lower())
+    ).order_by('-created_at')
+    if job.user_id:
+        # Same engineer first, then anyone
+        ordered = list(qs.filter(user_id=job.user_id)[:40]) + list(
+            qs.exclude(user_id=job.user_id)[:40]
+        )
+    else:
+        ordered = list(qs[:80])
+
+    seen: set[int] = set()
+    for paste in ordered:
+        if paste.id in seen:
+            continue
+        seen.add(paste.id)
+        block = extract_jin_block_for_reference(paste.raw_text or '', ref)
+        if block:
+            return {
+                'block': block,
+                'paste_id': paste.id,
+                'paste_at': paste.created_at,
+                'job_date': paste.job_date,
+            }
+    return None
