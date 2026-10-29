@@ -7,7 +7,7 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.db.models import Count, Q
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -1318,6 +1318,7 @@ def jobs_all(request):
     planner = active_user(request)
     q = (request.GET.get('q') or '').strip()
     status = (request.GET.get('status') or '').strip()
+    work_type = (request.GET.get('work_type') or '').strip()
     day_from = _parse_iso_date(request.GET.get('from', ''))
     day_to = _parse_iso_date(request.GET.get('to', ''))
     engineer_id = (request.GET.get('engineer') or '').strip()
@@ -1340,9 +1341,17 @@ def jobs_all(request):
         # else: all engineers
     else:
         jobs = jobs.filter(user=planner)
+        work_type = ''  # work-type filter is superuser-only
 
     if status and status in {c.value for c in Job.Status}:
         jobs = jobs.filter(status=status)
+    if is_super and work_type:
+        if work_type == 'none':
+            jobs = jobs.filter(Q(work_type='') | Q(work_type__isnull=True))
+        elif work_type in {c.value for c in Job.WorkType}:
+            jobs = jobs.filter(work_type=work_type)
+        else:
+            work_type = ''
     if day_from:
         jobs = jobs.filter(job_date__gte=day_from)
     if day_to:
@@ -1363,6 +1372,10 @@ def jobs_all(request):
         counts_qs = Job.objects.all()
         if selected_engineer:
             counts_qs = counts_qs.filter(user=selected_engineer)
+        if work_type == 'none':
+            counts_qs = counts_qs.filter(Q(work_type='') | Q(work_type__isnull=True))
+        elif work_type in {c.value for c in Job.WorkType}:
+            counts_qs = counts_qs.filter(work_type=work_type)
     else:
         counts_qs = Job.objects.filter(user=planner)
 
@@ -1375,7 +1388,6 @@ def jobs_all(request):
         for value, label in Job.Status.choices
     ]
 
-    edit_forms = {}
     if is_super:
         for j in jobs:
             j.edit_form = AdminJobEditForm(instance=j)
@@ -1387,6 +1399,8 @@ def jobs_all(request):
             'jobs': jobs,
             'q': q,
             'status': status,
+            'work_type': work_type,
+            'work_type_choices': Job.WorkType.choices,
             'day_from': day_from,
             'day_to': day_to,
             'status_choices': Job.Status.choices,
@@ -1592,22 +1606,26 @@ def _parse_van_kit_bulk_line(line: str) -> tuple[str, str] | None:
     return None
 
 
-@login_required
-@user_passes_test(_superuser_required)
-def van_kit(request):
-    filter_key = (request.GET.get('filter') or 'todo').strip().lower()
+def _van_kit_filtered_items(filter_key: str):
+    filter_key = (filter_key or 'todo').strip().lower()
     if filter_key not in ('todo', 'ordered', 'all'):
         filter_key = 'todo'
-
     items = VanKitItem.objects.all()
-    total = items.count()
-    ordered_count = items.filter(ordered=True).count()
-    todo_count = total - ordered_count
-
     if filter_key == 'todo':
         items = items.filter(ordered=False)
     elif filter_key == 'ordered':
         items = items.filter(ordered=True)
+    return filter_key, items
+
+
+@login_required
+@user_passes_test(_superuser_required)
+def van_kit(request):
+    filter_key, items = _van_kit_filtered_items(request.GET.get('filter'))
+    all_items = VanKitItem.objects.all()
+    total = all_items.count()
+    ordered_count = all_items.filter(ordered=True).count()
+    todo_count = total - ordered_count
 
     return render(
         request,
@@ -1621,6 +1639,83 @@ def van_kit(request):
             'scan_form': VanKitScanForm(),
         },
     )
+
+
+@login_required
+@user_passes_test(_superuser_required)
+@require_GET
+def van_kit_pdf(request):
+    """Download van kit as PDF — name + product code only."""
+    from io import BytesIO
+
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    filter_key, items = _van_kit_filtered_items(request.GET.get('filter'))
+    label = {
+        'todo': 'Still to order',
+        'ordered': 'Ordered',
+        'all': 'All items',
+    }.get(filter_key, 'Van kit')
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=16 * mm,
+        rightMargin=16 * mm,
+        topMargin=16 * mm,
+        bottomMargin=16 * mm,
+        title=f'Openreach stores items — {label}',
+    )
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph('Openreach stores items', styles['Heading1']),
+        Paragraph(f'{label} · {items.count()} item(s)', styles['Normal']),
+        Spacer(1, 8 * mm),
+    ]
+
+    rows = [['Item name', 'Code']]
+    for item in items:
+        rows.append([item.name or '', item.product_code or ''])
+
+    table = Table(rows, colWidths=[120 * mm, 50 * mm], repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.black),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                ('FONTNAME', (1, 1), (1, -1), 'Courier'),
+                ('GRID', (0, 0), (-1, -1), 0.4, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.Color(0.94, 0.94, 0.94)]),
+            ]
+        )
+    )
+    story.append(table)
+    doc.build(story)
+
+    filename = f'openreach-stores-items-{filter_key}.pdf'
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
 
 
 @login_required

@@ -126,15 +126,34 @@ class BulkParseTests(SimpleTestCase):
             Job.WorkType.SOGEA_REPAIR,
         )
         jumpers_required = parse_work_type(
-            'SOGEA new line provide | Jumpersrequired | Managed install | Standard'
+            'SOGEA new line provide | Jumpersrequired | Managed install | Standard',
+            'SOGEASIM',
+            'SOGEASIM',
         )
         self.assertEqual(
             jumpers_required['work_type'],
             Job.WorkType.MANAGED_INSTALL_JUMPERS,
         )
         self.assertEqual(jumpers_required['rate'], '42.00')
+        # Task Name SOGEA SIM / SOGEASIM → £42
+        self.assertEqual(
+            parse_work_type('', 'SOGEASIM', 'SOGEASIM')['work_type'],
+            Job.WorkType.MANAGED_INSTALL_JUMPERS,
+        )
+        self.assertEqual(
+            parse_work_type('', 'SOGEA SIM')['rate'],
+            '42.00',
+        )
+        # Task Name SOGEA Manage Install wins even if description says Jumpersrequired
+        manage_name = parse_work_type(
+            'SOGEA new line provide | Jumpersrequired | Managed install | Standard',
+            'SOGEA Manage Install',
+        )
+        self.assertEqual(manage_name['work_type'], Job.WorkType.MANAGED_INSTALL)
+        self.assertEqual(manage_name['rate'], '22.50')
         jumpers_exist = parse_work_type(
-            'SOGEA provide | Jumpers exist | Managedinstall | Standard |LTOK'
+            'SOGEA provide | Jumpers exist | Managedinstall | Standard |LTOK',
+            'SOGEA Manage Install',
         )
         self.assertEqual(
             jumpers_exist['work_type'],

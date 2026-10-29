@@ -16,12 +16,12 @@
 </section>
 
 <div class="status-pills">
-  <a class="status-pill {% if not status %}is-active{% endif %}" href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if engineer_id %}engineer={{ engineer_id }}&{% endif %}{% if day_from %}from={{ day_from|date:'Y-m-d' }}&{% endif %}{% if day_to %}to={{ day_to|date:'Y-m-d' }}{% endif %}">
+  <a class="status-pill {% if not status %}is-active{% endif %}" href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if engineer_id %}engineer={{ engineer_id }}&{% endif %}{% if work_type %}work_type={{ work_type|urlencode }}&{% endif %}{% if day_from %}from={{ day_from|date:'Y-m-d' }}&{% endif %}{% if day_to %}to={{ day_to|date:'Y-m-d' }}{% endif %}">
     All
   </a>
   {% for row in status_summary %}
   <a class="status-pill status-pill-{{ row.value }} {% if status == row.value %}is-active{% endif %}"
-     href="?status={{ row.value }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if engineer_id %}&engineer={{ engineer_id }}{% endif %}{% if day_from %}&from={{ day_from|date:'Y-m-d' }}{% endif %}{% if day_to %}&to={{ day_to|date:'Y-m-d' }}{% endif %}">
+     href="?status={{ row.value }}{% if q %}&q={{ q|urlencode }}{% endif %}{% if engineer_id %}&engineer={{ engineer_id }}{% endif %}{% if work_type %}&work_type={{ work_type|urlencode }}{% endif %}{% if day_from %}&from={{ day_from|date:'Y-m-d' }}{% endif %}{% if day_to %}&to={{ day_to|date:'Y-m-d' }}{% endif %}">
     {{ row.label }} <span>{{ row.count }}</span>
   </a>
   {% endfor %}
@@ -38,6 +38,13 @@
     <option value="{{ eng.pk }}" {% if engineer_id == eng.pk|stringformat:"s" %}selected{% endif %}>{{ eng.username }}</option>
     {% endfor %}
   </select>
+  <select class="input" name="work_type" aria-label="Job type">
+    <option value="">All job types</option>
+    <option value="none" {% if work_type == 'none' %}selected{% endif %}>No type set</option>
+    {% for value, label in work_type_choices %}
+    <option value="{{ value }}" {% if work_type == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
   {% endif %}
   <label class="filter-date">
     From
@@ -48,7 +55,7 @@
     <input class="input input-compact" type="date" name="to" value="{% if day_to %}{{ day_to|date:'Y-m-d' }}{% endif %}">
   </label>
   <button type="submit" class="btn btn-primary">Filter</button>
-  {% if q or status or engineer_id or day_from or day_to %}
+  {% if q or status or engineer_id or work_type or day_from or day_to %}
   <a class="btn btn-ghost" href="{% url 'jobs_all' %}">Clear</a>
   {% endif %}
 </form>

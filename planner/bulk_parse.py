@@ -114,11 +114,39 @@ def parse_work_type(
         return result(Job.WorkType.BROADBAND_REPAIR)
     if 'SELF INSTALL' in blob or 'SELF-INSTALL' in blob or 'SELFINSTALL' in blob:
         return result(Job.WorkType.SELF_INSTALL)
-    if 'MANAGED INSTALL' in blob or 'MANAGEDINSTALL' in blob:
-        # Jumpersrequired / Jumpers required → £42
-        # Jumpers exist → £22.50
-        if re.search(r'JUMPERS?\s*REQUIRED', blob) or 'JUMPERSREQUIRED' in blob:
-            return result(Job.WorkType.MANAGED_INSTALL_JUMPERS)
+
+    # Managed install rates — Task Name / JobType wins over description wording.
+    # (£42) SOGEASIM / SOGEA SIM
+    # (£22.50) SOGEA Manage Install
+    # Fallback: Jumpersrequired → £42, Jumpers exist / Managed install → £22.50
+    task_blob = f'{task_name or ""} {job_type or ""}'.upper()
+    task_blob = re.sub(r'\s+', ' ', task_blob).strip()
+    is_sogeasim = bool(
+        re.search(r'\bSOGEA\s*SIM\b', task_blob) or re.search(r'\bSOGEASIM\b', blob)
+    )
+    is_manage_install_name = bool(
+        re.search(r'SOGEA\s+MANAGE\s+INSTALL', task_blob)
+        or re.search(r'SOGEA\s+MANAGED\s+INSTALL', task_blob)
+    )
+    jumpers_required = bool(
+        re.search(r'JUMPERS?\s*REQUIRED', blob) or 'JUMPERSREQUIRED' in blob
+    )
+    jumpers_exist = bool(
+        re.search(r'JUMPERS?\s*EXIST', blob) or 'JUMPERSEXIST' in blob
+    )
+    is_managed_desc = bool(
+        'MANAGED INSTALL' in blob
+        or 'MANAGEDINSTALL' in blob
+        or 'MANAGE INSTALL' in blob
+        or 'MANAGEINSTALL' in blob
+    )
+    if is_manage_install_name:
+        return result(Job.WorkType.MANAGED_INSTALL)
+    if is_sogeasim:
+        return result(Job.WorkType.MANAGED_INSTALL_JUMPERS)
+    if jumpers_required and not jumpers_exist:
+        return result(Job.WorkType.MANAGED_INSTALL_JUMPERS)
+    if jumpers_exist or is_managed_desc or is_manage_install_name:
         return result(Job.WorkType.MANAGED_INSTALL)
     # FTTCFault / FTTC fault / FTTCT2R — same pay band as OGEA repair
     if 'FTTC' in blob:

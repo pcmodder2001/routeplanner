@@ -1358,6 +1358,13 @@ a { color: var(--primary); }
   margin: 0 0 0.85rem;
 }
 
+.van-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .van-filters {
   display: flex;
   flex-wrap: wrap;

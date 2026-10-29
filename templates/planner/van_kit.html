@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Van kit · Route Planner{% endblock %}
+{% block title %}Openreach stores items · Route Planner{% endblock %}
 {% block body_class %}page-van-kit{% endblock %}
 
 {% block content %}
 <section class="hero-bar">
   <div>
-    <h1>Van kit</h1>
+    <h1>Openreach stores items</h1>
     <p class="lede">Always-carry stock. Enter a product code to mark it ordered.</p>
   </div>
   <div class="van-stats">
@@ -29,14 +29,17 @@
     <a class="chip {% if filter_key == 'ordered' %}is-active{% endif %}" href="{% url 'van_kit' %}?filter=ordered">Ordered</a>
     <a class="chip {% if filter_key == 'all' %}is-active{% endif %}" href="{% url 'van_kit' %}?filter=all">All</a>
   </div>
-  {% if ordered_count %}
-  <form method="post" action="{% url 'van_kit_reset_ordered' %}"
-        onsubmit="return confirm('Clear all ordered marks?');">
-    {% csrf_token %}
-    <input type="hidden" name="filter" value="{{ filter_key }}">
-    <button type="submit" class="btn-link">Reset ordered</button>
-  </form>
-  {% endif %}
+  <div class="van-toolbar-actions">
+    <a class="btn btn-ghost btn-tiny" href="{% url 'van_kit_pdf' %}?filter={{ filter_key }}">Download PDF</a>
+    {% if ordered_count %}
+    <form method="post" action="{% url 'van_kit_reset_ordered' %}"
+          onsubmit="return confirm('Clear all ordered marks?');">
+      {% csrf_token %}
+      <input type="hidden" name="filter" value="{{ filter_key }}">
+      <button type="submit" class="btn-link">Reset ordered</button>
+    </form>
+    {% endif %}
+  </div>
 </div>
 
 {% if items %}

@@ -10,6 +10,7 @@ urlpatterns = [
     path('engineers/<int:user_id>/view/', views.view_as_user, name='view_as_user'),
     path('engineers/stop/', views.stop_view_as, name='stop_view_as'),
     path('van-kit/', views.van_kit, name='van_kit'),
+    path('van-kit/pdf/', views.van_kit_pdf, name='van_kit_pdf'),
     path('van-kit/add/', views.van_kit_add, name='van_kit_add'),
     path('van-kit/bulk/', views.van_kit_bulk_add, name='van_kit_bulk_add'),
     path('van-kit/scan/', views.van_kit_scan, name='van_kit_scan'),
