@@ -115,6 +115,10 @@ def parse_work_type(
     if 'SELF INSTALL' in blob or 'SELF-INSTALL' in blob or 'SELFINSTALL' in blob:
         return result(Job.WorkType.SELF_INSTALL)
 
+    # MOPRD (£25) — match Task Name / text token only (not description wording).
+    if re.search(r'\bMOPRD\b', blob) or re.search(r'\bMORPD\b', blob):
+        return result(Job.WorkType.MOPRD)
+
     # Managed install rates — Task Name / JobType wins over description wording.
     # (£42) SOGEASIM / SOGEA SIM
     # (£22.50) SOGEA Manage Install

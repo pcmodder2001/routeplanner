@@ -215,6 +215,23 @@ class BulkParseTests(SimpleTestCase):
             )['work_type'],
             Job.WorkType.SOGEA_REPAIR,
         )
+        moprd = parse_work_type(
+            'Overhead damage report task | Proceedwith caution',
+            task_name='MOPRD',
+            job_type='MOPRD',
+        )
+        self.assertEqual(moprd['work_type'], Job.WorkType.MOPRD)
+        self.assertEqual(moprd['work_type_label'], 'MOPRD')
+        self.assertEqual(moprd['rate'], '25.00')
+        self.assertEqual(
+            parse_work_type('', task_name='MORPD')['work_type'],
+            Job.WorkType.MOPRD,
+        )
+        # Description alone (no MOPRD token) must not classify as MOPRD
+        self.assertEqual(
+            parse_work_type('Overhead damage report task')['work_type'],
+            '',
+        )
 
     def test_revisit_note(self):
         from datetime import date
