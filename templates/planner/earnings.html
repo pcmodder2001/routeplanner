@@ -50,6 +50,23 @@
   </form>
 </div>
 
+<details class="panel payslip-check">
+  <summary>Check a payslip</summary>
+  <div class="payslip-body">
+    <p class="meta">
+      Paste the payment list. Each job is five lines: date, job number, description, amount, then the date it was paid.
+      Job numbers match either way (YO-MY6021791 and MY6021791). Nothing is saved.
+    </p>
+    <div hidden>{% csrf_token %}</div>
+    <textarea id="payslip-raw" class="payslip-raw" rows="8" spellcheck="false"
+      placeholder="30/10/2026&#10;YO-MY6021791&#10;BBR-COM Broadband Repair Com&#10;£ 40.00&#10;13/11/2026"></textarea>
+    <div class="payslip-actions">
+      <button type="button" class="btn btn-primary" id="payslip-check-btn">Check against jobs</button>
+    </div>
+    <p id="payslip-error" class="payslip-error" hidden></p>
+  </div>
+</details>
+
 {% if days %}
 {% for day in days %}
 <details class="panel earnings-day">
@@ -111,4 +128,277 @@
   <p>No jobs in this period.</p>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script>
+(function () {
+  const button = document.getElementById('payslip-check-btn');
+  const box = document.getElementById('payslip-raw');
+  const errorEl = document.getElementById('payslip-error');
+  if (!button || !box) return;
+
+  function csrfToken() {
+    const el = document.querySelector('[name=csrfmiddlewaretoken]');
+    return el ? el.value : '';
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+    });
+  }
+
+  function showError(message) {
+    errorEl.textContent = message;
+    errorEl.hidden = !message;
+  }
+
+  function refCell(row) {
+    const label = row.reference || '—';
+    const code = '<code>' + escapeHtml(label) + '</code>';
+    if (!row.href) return '<td>' + code + '</td>';
+    return '<td><a href="' + escapeHtml(row.href) + '">' + code + '</a></td>';
+  }
+
+  function textCell(value, extraClass) {
+    const cls = extraClass ? ' class="' + extraClass + '"' : '';
+    return '<td' + cls + '>' + escapeHtml(value || '—') + '</td>';
+  }
+
+  function table(headers, body) {
+    if (!body) return '';
+    return '<div class="bulk-table-wrap"><table class="bulk-table"><thead><tr>'
+      + headers.map(function (header) { return '<th>' + header + '</th>'; }).join('')
+      + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  }
+
+  function section(title, lead, headers, rows, rowHtml) {
+    if (!rows || !rows.length) return '';
+    return '<h3 class="payslip-section">' + escapeHtml(title) + '</h3>'
+      + (lead ? '<p class="payslip-note">' + escapeHtml(lead) + '</p>' : '')
+      + table(headers, rows.map(rowHtml).join(''));
+  }
+
+  function countLabel(count, singular, plural) {
+    return count + ' ' + (count === 1 ? singular : plural);
+  }
+
+  function chips(summary) {
+    const parts = [
+      '<span class="payslip-count">' + summary.parsed + ' lines</span>',
+      '<span class="payslip-count">Payslip ' + escapeHtml(summary.payslip_total) + '</span>',
+      summary.matched
+        ? '<span class="payslip-count is-ok">' + countLabel(summary.matched, 'match', 'matches') + '</span>'
+        : '',
+      summary.pay_conflicts
+        ? '<span class="payslip-count is-bad">' + countLabel(summary.pay_conflicts, 'pay mismatch', 'pay mismatches') + '</span>'
+        : '',
+      summary.not_in_planner
+        ? '<span class="payslip-count is-bad">' + summary.not_in_planner + ' not in planner</span>'
+        : '',
+      summary.missing_from_payslip
+        ? '<span class="payslip-count is-bad">' + summary.missing_from_payslip + ' missing from payslip</span>'
+        : '',
+      summary.duplicates
+        ? '<span class="payslip-count is-bad">' + countLabel(summary.duplicates, 'duplicate', 'duplicates') + '</span>'
+        : '',
+      summary.warnings
+        ? '<span class="payslip-count is-warn">' + summary.warnings + ' to review</span>'
+        : '',
+      summary.adjustments
+        ? '<span class="payslip-count">' + countLabel(summary.adjustments, 'deduction', 'deductions') + '</span>'
+        : ''
+    ];
+    return '<div class="payslip-counts">' + parts.filter(Boolean).join('') + '</div>';
+  }
+
+  function resultsHtml(data) {
+    const summary = data.summary || {};
+    const errors = (data.parse_errors || []).map(function (line) {
+      return '<li>' + escapeHtml(line) + '</li>';
+    }).join('');
+    let html = chips(summary);
+    if (summary.window_label) {
+      html += '<p class="payslip-note">' + escapeHtml(summary.window_label) + '</p>';
+    }
+    if (errors) {
+      html += '<ul class="payslip-skipped">' + errors + '</ul>';
+    }
+    html += section(
+      'Pay doesn’t match',
+      '',
+      ['Job', 'Date', 'Description', 'Payslip', 'Planner', 'Why'],
+      data.pay_conflicts,
+      function (row) {
+        const planner = [row.status, row.work_type, row.expected].filter(function (part) {
+          return part && part !== '—';
+        }).join(' · ');
+        return '<tr>'
+          + refCell(row)
+          + textCell(row.job_date)
+          + textCell(row.description, 'bulk-loc')
+          + textCell(row.paid, 'payslip-money')
+          + textCell(planner, 'payslip-money')
+          + textCell(row.detail, 'bulk-loc')
+          + '</tr>';
+      }
+    );
+    html += section(
+      'On the payslip, not in the planner',
+      '',
+      ['Job', 'Date', 'Description', 'Amount', 'Paid on'],
+      data.not_in_planner,
+      function (row) {
+        return '<tr>'
+          + refCell(row)
+          + textCell(row.job_date)
+          + textCell(row.description, 'bulk-loc')
+          + textCell(row.paid, 'payslip-money')
+          + textCell(row.paid_date)
+          + '</tr>';
+      }
+    );
+    html += section(
+      'In the planner, not on this payslip',
+      '',
+      ['Job', 'Date', 'Type', 'Status', 'Expected', 'Address'],
+      data.missing_from_payslip,
+      function (row) {
+        return '<tr>'
+          + refCell(row)
+          + textCell(row.job_date)
+          + textCell(row.work_type)
+          + textCell(row.status)
+          + textCell(row.expected, 'payslip-money')
+          + textCell(row.place, 'bulk-loc')
+          + '</tr>';
+      }
+    );
+    html += section(
+      'Same job number more than once',
+      '',
+      ['Job', 'Date', 'Description', 'Amount', 'Why'],
+      data.duplicates,
+      function (row) {
+        return '<tr>'
+          + refCell(row)
+          + textCell(row.job_date)
+          + textCell(row.description, 'bulk-loc')
+          + textCell(row.paid, 'payslip-money')
+          + textCell(row.detail, 'bulk-loc')
+          + '</tr>';
+      }
+    );
+    html += section(
+      'Date or status to review',
+      'The amount matches. The planner date or status does not.',
+      ['Job', 'Payslip date', 'Planner date', 'Status', 'Amount', 'Why'],
+      data.warnings,
+      function (row) {
+        return '<tr>'
+          + refCell(row)
+          + textCell(row.job_date)
+          + textCell(row.planner_date)
+          + textCell(row.status)
+          + textCell(row.paid, 'payslip-money')
+          + textCell(row.detail, 'bulk-loc')
+          + '</tr>';
+      }
+    );
+    html += section(
+      'Deductions',
+      'These did not match a job number. Incomplete-work clawbacks usually land here.',
+      ['Date', 'Code', 'Description', 'Amount'],
+      data.adjustments,
+      function (row) {
+        return '<tr>'
+          + textCell(row.job_date)
+          + refCell(row)
+          + textCell(row.description, 'bulk-loc')
+          + textCell(row.paid, 'payslip-money')
+          + '</tr>';
+      }
+    );
+    if (data.matched && data.matched.length) {
+      html += '<details class="payslip-matched"><summary>'
+        + data.matched.length + ' matched</summary>'
+        + table(
+          ['Job', 'Date', 'Description', 'Amount', 'Type'],
+          data.matched.map(function (row) {
+            return '<tr>'
+              + refCell(row)
+              + textCell(row.job_date)
+              + textCell(row.description, 'bulk-loc')
+              + textCell(row.paid, 'payslip-money')
+              + textCell(row.work_type)
+              + '</tr>';
+          }).join('')
+        )
+        + '</details>';
+    }
+    return html;
+  }
+
+  function showResults(data) {
+    const count = (data.summary && data.summary.issue_count) || 0;
+    const title = count
+      ? (count === 1 ? '1 thing to check' : count + ' things to check')
+      : 'Payments match';
+    Swal.fire({
+      icon: count ? 'warning' : 'success',
+      title: title,
+      html: resultsHtml(data),
+      width: 'min(96vw, 58rem)',
+      confirmButtonText: 'Close',
+      customClass: {
+        popup: 'payslip-swal',
+        confirmButton: 'btn btn-primary'
+      },
+      buttonsStyling: false
+    });
+  }
+
+  button.addEventListener('click', function () {
+    const raw = box.value || '';
+    if (!raw.trim()) {
+      showError('Paste the payslip first.');
+      box.focus();
+      return;
+    }
+    showError('');
+    button.disabled = true;
+    const previous = button.textContent;
+    button.textContent = 'Checking…';
+    fetch('{% url "payslip_check" %}', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken()
+      },
+      body: JSON.stringify({ raw: raw })
+    })
+      .then(function (response) {
+        return response.json().then(function (data) {
+          return { ok: response.ok, data: data };
+        });
+      })
+      .then(function (result) {
+        if (!result.data || !result.data.ok) {
+          showError((result.data && result.data.error) || 'Could not read that paste.');
+          return;
+        }
+        showResults(result.data);
+      })
+      .catch(function () {
+        showError('Could not check that paste. Refresh the page and try again.');
+      })
+      .finally(function () {
+        button.disabled = false;
+        button.textContent = previous;
+      });
+  });
+})();
+</script>
 {% endblock %}

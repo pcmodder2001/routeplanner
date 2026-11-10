@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from urllib.parse import urlencode
 
 import json
 
@@ -55,6 +56,7 @@ from .geocoding import (
 )
 from .models import BulkPasteLog, DayRoute, EngineerSettings, Job, VanKitItem, AuditLog
 from .osrm import active_routing_label
+from .payslip import reconcile_payslip
 from .planner_day import (
     format_planner_day,
     is_rolled_to_tomorrow,
@@ -1576,6 +1578,62 @@ def earnings_view(request):
             'planner_day_label': format_planner_day(today),
         },
     )
+
+
+_PAYSLIP_ROW_LISTS = (
+    'pay_conflicts',
+    'not_in_planner',
+    'missing_from_payslip',
+    'adjustments',
+    'warnings',
+    'duplicates',
+    'matched',
+)
+
+
+def _attach_payslip_links(request, planner, result: dict) -> None:
+    """Add a jobs-search link for each compared row. Nothing is stored."""
+    base = reverse('jobs_all')
+    for key in _PAYSLIP_ROW_LISTS:
+        for row in result.get(key) or []:
+            ref = (row.get('link_ref') or '').strip()
+            if not ref:
+                row['href'] = ''
+                continue
+            params = {'q': ref}
+            if request.user.is_superuser:
+                params['engineer'] = str(planner.pk)
+            row['href'] = f'{base}?{urlencode(params)}'
+
+
+@login_required
+@require_POST
+def payslip_check(request):
+    """Compare a pasted payslip with this engineer's jobs. Does not save."""
+    planner = active_user(request)
+    try:
+        payload = json.loads(request.body.decode() or '{}')
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({'ok': False, 'error': 'Invalid request.'}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({'ok': False, 'error': 'Invalid request.'}, status=400)
+    raw = payload.get('raw')
+    if not isinstance(raw, str) or not raw.strip():
+        return JsonResponse(
+            {'ok': False, 'error': 'Paste the payslip first.'},
+            status=400,
+        )
+    if len(raw) > 200_000:
+        return JsonResponse(
+            {'ok': False, 'error': 'That paste is too long.'},
+            status=400,
+        )
+    jobs = list(Job.objects.filter(user=planner))
+    result = reconcile_payslip(raw, jobs)
+    if result.get('ok'):
+        _attach_payslip_links(request, planner, result)
+        return JsonResponse(result)
+    return JsonResponse(result, status=400)
 
 
 def _van_kit_redirect(filter_key: str = 'todo'):

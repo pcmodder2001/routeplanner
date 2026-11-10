@@ -1,5 +1,8 @@
 from django.test import SimpleTestCase
 
+from datetime import date
+from decimal import Decimal
+
 from planner.bulk_parse import (
     build_location,
     extract_uk_postcode,
@@ -11,6 +14,7 @@ from planner.bulk_parse import (
     parse_work_type,
 )
 from planner.models import Job
+from planner.payslip import parse_payslip, reconcile_payslip
 
 SAMPLE = """
 Jin no: YO-MY5699295
@@ -250,3 +254,363 @@ class BulkParseTests(SimpleTestCase):
         self.assertIn('Complete', note)
         self.assertIn('MY123', note)
         self.assertEqual(format_revisit_note([]), '')
+
+
+SAMPLE_PAYSLIP = """
+30/10/2026
+YO-MY6021791
+BBR-COM Broadband Repair Com
+£ 40.00
+13/11/2026
+30/10/2026
+YO-MY6024582
+SOGEAT2R Faults
+£ 30.00
+13/11/2026
+29/10/2026
+YO-MY6021104
+Copper repair
+£ 30.00
+13/11/2026
+29/10/2026
+B6-50447855A
+SOGEA MI + Copper provisions
+£ 42.00
+13/11/2026
+28/10/2026
+YO-MY6010595
+Copper repair
+£ 30.00
+13/11/2026
+28/10/2026
+YO-MY6006170
+BBR-COM Broadband Repair Com
+£ 40.00
+13/11/2026
+28/10/2026
+B6-50424184A
+SOGEA MI + Copper provisions
+£ 42.00
+13/11/2026
+27/10/2026
+B6-50420968A
+SOGEA MI + Copper provisions
+£ 42.00
+13/11/2026
+27/10/2026
+B6-29419644A
+SOGEA MI
+£ 22.50
+13/11/2026
+27/10/2026
+NC-NE6007410
+BBR-COM Broadband Repair Com
+£ 40.00
+13/11/2026
+26/10/2026
+YO-MY5995873
+SOGEAT2R Faults
+£ 30.00
+13/11/2026
+26/10/2026
+YO-MY5997076
+SOGEAT2R Faults
+£ 30.00
+13/11/2026
+23/10/2026
+YO-MY5978204
+BBR-COM Broadband Repair Com
+£ 40.00
+13/11/2026
+23/10/2026
+B6-29540728A
+SOGEA MI
+£ 22.50
+13/11/2026
+21/10/2026
+YO-MY5969151
+BBR-COM Broadband Repair Com
+£ 40.00
+13/11/2026
+20/10/2026
+B6-29439157A
+SOGEA SI
+£ 11.50
+13/11/2026
+19/10/2026
+YO-MY5962277
+SOGEAT2R Faults
+£ 30.00
+13/11/2026
+19/10/2026
+B6-29237834A
+SOGEA SI
+£ 11.50
+13/11/2026
+19/10/2026
+B6-29445851A
+SOGEA SI
+£ 11.50
+13/11/2026
+19/10/2026
+B6-29364664A
+SOGEA MI
+£ 22.50
+13/11/2026
+19/10/2026
+YO-MY5936404
+BBR-COM Broadband Repair Com
+£ 40.00
+13/11/2026
+30/09/2026
+20006
+Incomplete Work
+£ -13.00
+13/11/2026
+28/09/2026
+20006
+Incomplete Work
+£ -13.00
+13/11/2026
+"""
+
+
+def _job(**kwargs):
+    defaults = {
+        'location': '1 High Street',
+        'job_date': date(2026, 10, 30),
+        'status': Job.Status.DONE,
+        'work_type': Job.WorkType.BROADBAND_REPAIR,
+    }
+    defaults.update(kwargs)
+    return Job(**defaults)
+
+
+class PayslipTests(SimpleTestCase):
+    def test_parses_sample_payslip(self):
+        records, errors = parse_payslip(SAMPLE_PAYSLIP)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(records), 23)
+        self.assertEqual(records[0]['reference'], 'YO-MY6021791')
+        self.assertEqual(records[0]['amount'], Decimal('40.00'))
+        self.assertEqual(records[0]['job_date'], date(2026, 10, 30))
+        self.assertEqual(records[0]['paid_date'], date(2026, 11, 13))
+        self.assertEqual(records[-1]['reference'], '20006')
+        self.assertEqual(records[-1]['amount'], Decimal('-13.00'))
+        total = sum((row['amount'] for row in records), Decimal('0.00'))
+        self.assertEqual(total, Decimal('622.00'))
+
+    def test_blank_lines_do_not_break_records(self):
+        raw = """
+        30/10/2026
+
+        YO-MY6021791
+        BBR-COM Broadband Repair Com
+
+        £ 40.00
+        13/11/2026
+        """
+        records, errors = parse_payslip(raw)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(records), 1)
+
+    def test_matches_prefix_and_pay(self):
+        jobs = [
+            _job(reference='MY6021791', work_type=Job.WorkType.BROADBAND_REPAIR),
+            _job(
+                reference='50447855A',
+                job_date=date(2026, 10, 29),
+                work_type=Job.WorkType.MANAGED_INSTALL_JUMPERS,
+            ),
+        ]
+        raw = """
+        30/10/2026
+        YO-MY6021791
+        BBR-COM Broadband Repair Com
+        £ 40.00
+        13/11/2026
+        29/10/2026
+        B6-50447855A
+        SOGEA MI + Copper provisions
+        £ 42.00
+        13/11/2026
+        """
+        result = reconcile_payslip(raw, jobs)
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['summary']['matched'], 2)
+        self.assertEqual(result['summary']['issue_count'], 0)
+        self.assertEqual(result['summary']['payslip_total'], '£82.00')
+
+    def test_full_reference_stored_on_the_job_still_matches(self):
+        job = _job(reference='YO-MY6021791')
+        raw = """
+        30/10/2026
+        YO-MY6021791
+        BBR-COM Broadband Repair Com
+        £ 40.00
+        13/11/2026
+        """
+        result = reconcile_payslip(raw, [job])
+        self.assertEqual(result['summary']['matched'], 1)
+
+    def test_pay_conflict_and_missing_job(self):
+        job = _job(
+            reference='MY6021791',
+            work_type=Job.WorkType.SOGEA_REPAIR,
+        )
+        raw = """
+        30/10/2026
+        YO-MY6021791
+        BBR-COM Broadband Repair Com
+        £ 40.00
+        13/11/2026
+        29/10/2026
+        YO-MY9999999
+        Copper repair
+        £ 30.00
+        13/11/2026
+        """
+        result = reconcile_payslip(raw, [job])
+        self.assertEqual(len(result['pay_conflicts']), 1)
+        self.assertIn('£40.00', result['pay_conflicts'][0]['detail'])
+        self.assertIn('£30.00', result['pay_conflicts'][0]['detail'])
+        self.assertEqual(result['not_in_planner'][0]['reference'], 'YO-MY9999999')
+        self.assertEqual(result['summary']['issue_count'], 2)
+
+    def test_mpu_rate_and_pending_warning(self):
+        jobs = [
+            _job(
+                reference='MY1',
+                status=Job.Status.MPU,
+                work_type=Job.WorkType.COPPER_REPAIR,
+            ),
+            _job(
+                reference='MY2',
+                job_date=date(2026, 10, 29),
+                status=Job.Status.PENDING,
+                work_type=Job.WorkType.BROADBAND_REPAIR,
+            ),
+        ]
+        raw = """
+        30/10/2026
+        YO-MY1
+        Copper repair
+        £ 30.00
+        13/11/2026
+        29/10/2026
+        YO-MY2
+        BBR-COM Broadband Repair Com
+        £ 40.00
+        13/11/2026
+        """
+        result = reconcile_payslip(raw, jobs)
+        self.assertEqual(len(result['pay_conflicts']), 1)
+        self.assertIn('MPU', result['pay_conflicts'][0]['detail'])
+        self.assertIn('£15.00', result['pay_conflicts'][0]['detail'])
+        self.assertEqual(len(result['warnings']), 1)
+        self.assertIn('pending', result['warnings'][0]['detail'])
+
+    def test_date_mismatch_is_a_warning_when_pay_matches(self):
+        job = _job(reference='MY6021791', job_date=date(2026, 10, 29))
+        raw = """
+        30/10/2026
+        YO-MY6021791
+        BBR-COM Broadband Repair Com
+        £ 40.00
+        13/11/2026
+        """
+        result = reconcile_payslip(raw, [job])
+        self.assertEqual(result['summary']['matched'], 0)
+        self.assertEqual(len(result['warnings']), 1)
+        self.assertIn('29/10/2026', result['warnings'][0]['detail'])
+
+    def test_duplicate_line_and_adjustments(self):
+        job = _job(reference='MY6021791')
+        raw = """
+        30/10/2026
+        YO-MY6021791
+        BBR-COM Broadband Repair Com
+        £ 40.00
+        13/11/2026
+        30/10/2026
+        YO-MY6021791
+        BBR-COM Broadband Repair Com
+        £ 40.00
+        13/11/2026
+        30/09/2026
+        20006
+        Incomplete Work
+        £ -13.00
+        13/11/2026
+        """
+        result = reconcile_payslip(raw, [job])
+        self.assertEqual(result['summary']['matched'], 1)
+        self.assertEqual(len(result['duplicates']), 1)
+        self.assertEqual(len(result['adjustments']), 1)
+        self.assertEqual(result['not_in_planner'], [])
+        self.assertEqual(result['summary']['payslip_total'], '£67.00')
+
+    def test_missing_completed_job_inside_the_pay_window(self):
+        jobs = [
+            _job(reference='MY6021791'),
+            _job(
+                reference='MY-MISSING',
+                job_date=date(2026, 10, 21),
+                work_type=Job.WorkType.SELF_INSTALL,
+            ),
+            _job(
+                reference='MY-TOO-EARLY',
+                job_date=date(2026, 10, 1),
+                work_type=Job.WorkType.SELF_INSTALL,
+            ),
+            _job(
+                reference='MY-PENDING',
+                job_date=date(2026, 10, 21),
+                status=Job.Status.PENDING,
+            ),
+            _job(
+                reference='MY-FAILED',
+                job_date=date(2026, 10, 21),
+                status=Job.Status.FAILED,
+            ),
+        ]
+        raw = """
+        30/10/2026
+        YO-MY6021791
+        BBR-COM Broadband Repair Com
+        £ 40.00
+        13/11/2026
+        19/10/2026
+        YO-MY5962277
+        SOGEAT2R Faults
+        £ 30.00
+        13/11/2026
+        30/09/2026
+        20006
+        Incomplete Work
+        £ -13.00
+        13/11/2026
+        """
+        result = reconcile_payslip(raw, jobs)
+        missing_refs = [row['reference'] for row in result['missing_from_payslip']]
+        self.assertEqual(missing_refs, ['MY-MISSING'])
+        self.assertEqual(result['summary']['window_from'], '19/10/2026')
+        self.assertEqual(result['summary']['window_to'], '30/10/2026')
+        self.assertEqual(len(result['not_in_planner']), 1)
+        self.assertEqual(result['not_in_planner'][0]['reference'], 'YO-MY5962277')
+        self.assertEqual(len(result['adjustments']), 1)
+
+    def test_sample_with_no_jobs_flags_payments_and_keeps_deductions(self):
+        result = reconcile_payslip(SAMPLE_PAYSLIP, [])
+        self.assertEqual(result['summary']['parsed'], 23)
+        self.assertEqual(result['summary']['not_in_planner'], 21)
+        self.assertEqual(result['summary']['adjustments'], 2)
+        self.assertEqual(result['summary']['payslip_total'], '£622.00')
+        self.assertEqual(result['summary']['window_from'], '19/10/2026')
+        self.assertEqual(result['summary']['window_to'], '30/10/2026')
+        self.assertEqual(result['missing_from_payslip'], [])
+
+    def test_empty_paste(self):
+        result = reconcile_payslip('   \n', [])
+        self.assertFalse(result['ok'])
+        self.assertIn('No payment lines', result['error'])
